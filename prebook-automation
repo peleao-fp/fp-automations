@@ -1,0 +1,7 @@
+cd ~/prebook-automation
+git init
+git add .
+git commit -m "feat: prebook automation initial setup"
+git branch -M main
+git remote add origin https://github.com/peleao-fp/fp-automations.git
+git push -u origin main
