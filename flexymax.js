@@ -251,16 +251,22 @@ async function insertPrebookLine(params) {
       k23: 0,
     }
   );
-
+async function readPrebookHeader(prebook_uq) {
+  const rows = await callAction('659f60bcb185274a675b81e1',
+    { 'appsmith.store.lcPrebook_Uq': 'k0' },
+    { k0: prebook_uq });
+  return rows[0] || null;
+}
   if (!rows[0] || rows[0].error) throw new Error(`Insert line failed: ${JSON.stringify(rows[0])}`);
   return rows[0];
 }
 
-module.exports = {
-  searchProduct,
-  dateToJulian,
-  getDefaultCarrier,
-  getShipAddress,
-  createPrebookHeader,
+module.exports = { 
+  searchProduct, 
+  dateToJulian, 
+  getDefaultCarrier, 
+  getShipAddress, 
+  createPrebookHeader, 
   insertPrebookLine,
+  readPrebookHeader
 };
