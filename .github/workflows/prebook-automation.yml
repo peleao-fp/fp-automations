@@ -31,15 +31,24 @@ jobs:
         run: |
           GIST_ID="${{ github.event.client_payload.gist_id || inputs.gist_id }}"
           echo "Fetching gist: $GIST_ID"
+
           curl -s "https://api.github.com/gists/$GIST_ID" \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" | \
-            node -e "
-              const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-              const file = d.files['email_body.html'] || Object.values(d.files)[0];
-              require('fs').writeFileSync('/tmp/email_body.html', file.content);
-              console.log('Fetched', file.content.length, 'bytes');
-            "
+            -H "Accept: application/vnd.github.v3+json" \
+            -o /tmp/gist_response.json
+
+          node -e "
+            const fs = require('fs');
+            const d = JSON.parse(fs.readFileSync('/tmp/gist_response.json','utf8'));
+            if (!d.files) {
+              console.error('Gist error:', JSON.stringify(d).substring(0,200));
+              process.exit(1);
+            }
+            const files = Object.values(d.files);
+            const content = files[0].content || '';
+            fs.writeFileSync('/tmp/email_body.html', content);
+            console.log('OK - fetched', content.length, 'bytes from:', files[0].filename);
+          "
 
       - name: Run automation
         run: |
@@ -79,9 +88,11 @@ jobs:
         if: always()
         run: |
           GIST_ID="${{ github.event.client_payload.gist_id || inputs.gist_id }}"
-          curl -s -X DELETE "https://api.github.com/gists/$GIST_ID" \
-            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}"
-          echo "Gist deleted"
+          if [ -n "$GIST_ID" ]; then
+            curl -s -X DELETE "https://api.github.com/gists/$GIST_ID" \
+              -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}"
+            echo "Gist $GIST_ID deleted"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
