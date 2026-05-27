@@ -26,16 +26,46 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
+
       - name: Run automation
+        id: automation
         run: |
           SUBJECT="${{ github.event.client_payload.subject || inputs.subject }}"
           DRY_RUN="${{ github.event.client_payload.dry_run || inputs.dry_run }}"
           echo '${{ github.event.client_payload.body || inputs.body }}' > /tmp/email_body.html
+
           if [ "$DRY_RUN" = "true" ]; then
             node index.js --subject "$SUBJECT" --html /tmp/email_body.html --dry-run
           else
             node index.js --subject "$SUBJECT" --html /tmp/email_body.html
           fi
+
+      - name: Send results to Power Automate
+        if: always()
+        run: |
+          SUBJECT="${{ github.event.client_payload.subject || inputs.subject }}"
+          RESULTS_FILE=$(ls prebook-results-*.json 2>/dev/null | head -1)
+
+          if [ -z "$RESULTS_FILE" ]; then
+            SUMMARY="❌ Script failed before generating results."
+            RESULTS="[]"
+          else
+            RESULTS=$(cat "$RESULTS_FILE")
+            # Build summary text
+            SUMMARY=$(node -e "
+              const r = JSON.parse(process.env.RESULTS);
+              const lines = r.map(x => {
+                if (x.error) return '❌ ' + x.location + ': ' + x.error;
+                return '✅ ' + x.location + ': Prebook #' + x.pbook_no + ' — ' + x.ok + ' products OK' + (x.fail > 0 ? ', ' + x.fail + ' failed' : '');
+              });
+              console.log(lines.join('<br>'));
+            " || echo "Error generating summary")
+          fi
+
+          curl -s -X POST "${{ secrets.NOTIFY_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"subject\": \"$SUBJECT\", \"summary\": \"$SUMMARY\", \"results\": $RESULTS}"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
