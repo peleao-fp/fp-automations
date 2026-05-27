@@ -1,0 +1,44 @@
+name: Prebook Automation
+
+on:
+  repository_dispatch:
+    types: [prebook-trigger]
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: 'Email subject'
+        required: true
+      body:
+        description: 'Email HTML body'
+        required: true
+      dry_run:
+        description: 'Dry run?'
+        default: 'false'
+        type: boolean
+
+jobs:
+  create-prebooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - name: Run automation
+        run: |
+          SUBJECT="${{ github.event.client_payload.subject || inputs.subject }}"
+          DRY_RUN="${{ github.event.client_payload.dry_run || inputs.dry_run }}"
+          echo '${{ github.event.client_payload.body || inputs.body }}' > /tmp/email_body.html
+          if [ "$DRY_RUN" = "true" ]; then
+            node index.js --subject "$SUBJECT" --html /tmp/email_body.html --dry-run
+          else
+            node index.js --subject "$SUBJECT" --html /tmp/email_body.html
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ github.run_id }}
+          path: prebook-results-*.json
+          retention-days: 30
