@@ -42,7 +42,7 @@ jobs:
             const files = Object.values(d.files);
             const content = files[0].content || '';
             fs.writeFileSync('/tmp/email_body.html', content);
-            console.log('OK -', content.length, 'bytes from:', files[0].filename);
+            console.log('OK -', content.length, 'bytes');
           "
 
       - name: Run automation
@@ -57,41 +57,66 @@ jobs:
 
       - name: Save results to fixed Gist
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+          SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
         run: |
-          SUBJECT="${{ github.event.client_payload.subject || inputs.subject }}"
-          RESULTS_FILE=$(ls prebook-results-*.json 2>/dev/null | head -1)
+          node -e "
+            const fs   = require('fs');
+            const https = require('https');
 
-          if [ -z "$RESULTS_FILE" ]; then
-            CONTENT="{\"subject\":\"$SUBJECT\",\"status\":\"failed\",\"results\":[],\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-          else
-            RESULTS=$(cat "$RESULTS_FILE")
-            CONTENT=$(node -e "
-              const r = JSON.parse(process.env.RESULTS);
-              const out = {
-                subject: process.env.SUBJECT,
-                timestamp: new Date().toISOString(),
-                status: r.every(x=>x.success) ? 'success' : 'partial',
-                results: r.map(x => ({
-                  location: x.location,
-                  success: x.success,
-                  pbook_no: x.pbook_no || '?',
-                  prebook_uq: x.prebook_uq,
-                  ok: x.ok || 0,
-                  fail: x.fail || 0,
-                  error: x.error || null
-                }))
-              };
-              console.log(JSON.stringify(out));
-            " RESULTS="$RESULTS" SUBJECT="$SUBJECT")
-          fi
+            const subject = process.env.SUBJECT || '';
+            const gistId  = process.env.RESULTS_GIST_ID;
+            const token   = process.env.GH_TOKEN;
 
-          # Update the fixed results Gist
-          curl -s -X PATCH "https://api.github.com/gists/${{ secrets.RESULTS_GIST_ID }}" \
-            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"files\":{\"results.json\":{\"content\":$(echo $CONTENT | node -e \"process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8').trim()))\" )}}}"
+            // Read results file
+            const files = fs.readdirSync('.').filter(f => f.startsWith('prebook-results-') && f.endsWith('.json'));
+            let results = [];
+            if (files.length > 0) {
+              try { results = JSON.parse(fs.readFileSync(files[0], 'utf8')); } catch(e) {}
+            }
 
-          echo "Results saved to Gist ${{ secrets.RESULTS_GIST_ID }}"
+            const content = JSON.stringify({
+              subject,
+              timestamp: new Date().toISOString(),
+              status: results.length > 0 && results.every(x => x.success) ? 'success' : results.length === 0 ? 'failed' : 'partial',
+              results: results.map(x => ({
+                location:   x.location   || '?',
+                success:    x.success    || false,
+                pbook_no:   x.pbook_no   || '?',
+                prebook_uq: x.prebook_uq || '?',
+                ok:         x.ok         || 0,
+                fail:       x.fail       || 0,
+                error:      x.error      || null,
+              }))
+            }, null, 2);
+
+            const body = JSON.stringify({ files: { 'results.json': { content } } });
+
+            const req = https.request({
+              hostname: 'api.github.com',
+              path: '/gists/' + gistId,
+              method: 'PATCH',
+              headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json',
+                'User-Agent': 'fp-automations',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Length': Buffer.byteLength(body),
+              }
+            }, res => {
+              let data = '';
+              res.on('data', c => data += c);
+              res.on('end', () => {
+                if (res.statusCode === 200) console.log('Results saved to Gist!');
+                else console.error('Gist update failed:', res.statusCode, data.substring(0, 200));
+              });
+            });
+            req.on('error', e => console.error('Error:', e.message));
+            req.write(body);
+            req.end();
+          "
 
       - name: Delete email Gist
         if: always()
