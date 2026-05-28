@@ -8,7 +8,25 @@ function formatDate(d) {
   return d.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
 }
 function addDays(d, n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
-function extractCode(s) { return (s||'').trim().split(/\s+/)[0]; }
+function extractCode(s) {
+  const parts = (s||'').trim().split(/\s+/);
+  if (!parts.length) return '';
+  const first = parts[0];
+  // Short letter-only prefix + numeric code → combine (e.g. "UN 616-24-07" → "UN616-24-07")
+  if (first.length <= 3 && /^[A-Za-z]+$/.test(first) && parts[1] && /\d/.test(parts[1])) {
+    return first + parts[1];
+  }
+  // First token has numbers → it's a product code, use it directly
+  if (/\d/.test(first)) return first;
+  // No numbers → descriptive name (e.g. "BUBBLE BALL 8 INCHES")
+  // Use words up to and including the first number (size indicator)
+  const searchParts = [first];
+  for (let i = 1; i < parts.length; i++) {
+    searchParts.push(parts[i]);
+    if (/\d/.test(parts[i])) break;
+  }
+  return searchParts.join(' ');
+}
 
 async function createPrebook(data, dryRun=false) {
   const { location, grower_name, lines } = data;
