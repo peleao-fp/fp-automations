@@ -81,7 +81,8 @@ async function createPrebook(data, dryRun=false) {
       if (!p) { console.log('NOT FOUND ⚠️'); fail++; continue; }
       await flexy.insertPrebookLine({
         prebook_uq, product_uq:p.unico, case_uq:p.case_uq,
-        up_x_pack:p.up_x_pack||1, up_x_case:p.up_x_case||1,
+        up_x_pack:  1,
+        up_x_case:  line.units_x_box || p.up_x_case || 1,
         sales_price:line.box_price, qty_boxes:line.qty_boxes,
         salesman_uq:cfg.SALESMAN_UQ,
       });
