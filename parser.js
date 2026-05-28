@@ -91,6 +91,7 @@ function parseOneTable($, tbl) {
       product_code: productStr.trim(),
       qty_boxes:    qty > 0 ? qty : 1,
       box_price:    price,
+      units_x_box:  parseNum(getColValue(row, 'units_x_box', 'units_x_case', 'units_per_box', 'unitsxbox')),
       source:       getColValue(row, 'source', 'type').trim(),
     });
   });
