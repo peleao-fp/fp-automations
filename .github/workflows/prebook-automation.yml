@@ -31,23 +31,18 @@ jobs:
         run: |
           GIST_ID="${{ github.event.client_payload.gist_id || inputs.gist_id }}"
           echo "Fetching gist: $GIST_ID"
-
           curl -s "https://api.github.com/gists/$GIST_ID" \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             -o /tmp/gist_response.json
-
           node -e "
             const fs = require('fs');
             const d = JSON.parse(fs.readFileSync('/tmp/gist_response.json','utf8'));
-            if (!d.files) {
-              console.error('Gist error:', JSON.stringify(d).substring(0,200));
-              process.exit(1);
-            }
+            if (!d.files) { console.error('Gist error:', JSON.stringify(d).substring(0,200)); process.exit(1); }
             const files = Object.values(d.files);
             const content = files[0].content || '';
             fs.writeFileSync('/tmp/email_body.html', content);
-            console.log('OK - fetched', content.length, 'bytes from:', files[0].filename);
+            console.log('OK -', content.length, 'bytes from:', files[0].filename);
           "
 
       - name: Run automation
@@ -60,38 +55,52 @@ jobs:
             node index.js --subject "$SUBJECT" --html /tmp/email_body.html
           fi
 
-      - name: Send results to Power Automate
+      - name: Save results to fixed Gist
         if: always()
         run: |
           SUBJECT="${{ github.event.client_payload.subject || inputs.subject }}"
           RESULTS_FILE=$(ls prebook-results-*.json 2>/dev/null | head -1)
+
           if [ -z "$RESULTS_FILE" ]; then
-            SUMMARY="❌ Script failed before generating results."
-            RESULTS="[]"
+            CONTENT="{\"subject\":\"$SUBJECT\",\"status\":\"failed\",\"results\":[],\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
           else
             RESULTS=$(cat "$RESULTS_FILE")
-            SUMMARY=$(RESULTS="$RESULTS" node -e "
+            CONTENT=$(node -e "
               const r = JSON.parse(process.env.RESULTS);
-              const lines = r.map(x => {
-                if (x.error) return '❌ ' + x.location + ': ' + x.error;
-                const fail = x.fail > 0 ? ', ' + x.fail + ' failed ⚠️' : '';
-                return '✅ ' + x.location + ': Prebook #' + x.pbook_no + ' — ' + x.ok + ' products OK' + fail;
-              });
-              console.log(lines.join('<br>'));
-            " 2>/dev/null || echo "Error generating summary")
+              const out = {
+                subject: process.env.SUBJECT,
+                timestamp: new Date().toISOString(),
+                status: r.every(x=>x.success) ? 'success' : 'partial',
+                results: r.map(x => ({
+                  location: x.location,
+                  success: x.success,
+                  pbook_no: x.pbook_no || '?',
+                  prebook_uq: x.prebook_uq,
+                  ok: x.ok || 0,
+                  fail: x.fail || 0,
+                  error: x.error || null
+                }))
+              };
+              console.log(JSON.stringify(out));
+            " RESULTS="$RESULTS" SUBJECT="$SUBJECT")
           fi
-          curl -s -X POST "${{ secrets.NOTIFY_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"subject\": \"$SUBJECT\", \"summary\": \"$SUMMARY\", \"results\": $RESULTS}"
 
-      - name: Delete Gist
+          # Update the fixed results Gist
+          curl -s -X PATCH "https://api.github.com/gists/${{ secrets.RESULTS_GIST_ID }}" \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"files\":{\"results.json\":{\"content\":$(echo $CONTENT | node -e \"process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8').trim()))\" )}}}"
+
+          echo "Results saved to Gist ${{ secrets.RESULTS_GIST_ID }}"
+
+      - name: Delete email Gist
         if: always()
         run: |
           GIST_ID="${{ github.event.client_payload.gist_id || inputs.gist_id }}"
           if [ -n "$GIST_ID" ]; then
             curl -s -X DELETE "https://api.github.com/gists/$GIST_ID" \
               -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}"
-            echo "Gist $GIST_ID deleted"
+            echo "Email gist deleted"
           fi
 
       - uses: actions/upload-artifact@v4
