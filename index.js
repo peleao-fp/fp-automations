@@ -18,14 +18,9 @@ function extractCode(s) {
   }
   // First token has numbers → it's a product code, use it directly
   if (/\d/.test(first)) return first;
-  // No numbers → descriptive name (e.g. "BUBBLE BALL 8 INCHES")
-  // Use words up to and including the first number (size indicator)
-  const searchParts = [first];
-  for (let i = 1; i < parts.length; i++) {
-    searchParts.push(parts[i]);
-    if (/\d/.test(parts[i])) break;
-  }
-  return searchParts.join(' ');
+  // No numbers in first token → descriptive name from Flexymax (e.g. "BUBBLE BALL 8 INCHES")
+  // Use the full description for exact match
+  return (s||'').trim();
 }
 
 async function createPrebook(data, dryRun=false) {
