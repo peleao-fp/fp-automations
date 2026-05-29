@@ -15,6 +15,22 @@ function isBoxProduct(productStr) {
   return cfg.BY_BOX_PRODUCTS.some(p => name.includes(p.toUpperCase()));
 }
 
+// Look up grower UQ from email grower name
+function findGrowerUq(growerName) {
+  if (!growerName) return null;
+  const upper = growerName.trim().toUpperCase();
+  const entry = cfg.GROWER_MAP.find(g =>
+    g.match.some(m => upper.includes(m.toUpperCase()))
+  );
+  if (entry && entry.uq) {
+    console.log(`   Grower: ${entry.name} (${entry.uq})`);
+    return entry.uq;
+  }
+  if (entry) console.warn(`   ⚠️ Grower "${growerName}" found but no UQ yet (${entry.name})`);
+  else console.warn(`   ⚠️ Grower "${growerName}" not found in map`);
+  return null;
+}
+
 // Smart search term extraction
 function extractSearchTerm(s) {
   const parts = (s||'').trim().split(/\s+/);
@@ -32,15 +48,18 @@ function extractSearchTerm(s) {
 
 // Create ONE prebook (either BOX or UNITS)
 async function createPrebook(location, type, lines, grower_name, dryRun=false) {
-  const locCfg = cfg.LOCATIONS[location]?.[type];
+  const locCfg   = cfg.LOCATIONS[location]?.[type];
   if (!locCfg) throw new Error(`No config for ${location}/${type}`);
+
+  // Look up grower UQ (only used for UNITS)
+  const growerUq = type === 'UNITS' ? findGrowerUq(grower_name) : null;
 
   console.log(`\n${'='.repeat(55)}`);
   console.log(`📦 ${location} ${type} — ${locCfg.label}`);
   console.log(`   Grower: ${grower_name} | Products: ${lines.length}`);
 
-  const pbDate   = formatDate(new Date());
   const shipDate = formatDate(addDays(new Date(), cfg.SHIPPING_DAYS_AHEAD));
+  const pbDate   = shipDate; // prebook date = shipping date (7 days ahead)
   console.log(`   PB: ${pbDate} → Ship: ${shipDate}`);
 
   if (dryRun) {
@@ -99,6 +118,8 @@ async function createPrebook(location, type, lines, grower_name, dryRun=false) {
       // Field mapping depends on type
       const up_x_pack  = type === 'BOX'   ? (line.units_x_box || 1) : 1;
       const packs_case = type === 'UNITS'  ? (line.units_x_box || 1) : 1;
+      // Grower: only on UNITS prebook, not BOX/Everyday
+      const grower_uq  = type === 'UNITS'  ? growerUq : null;
 
       await flexy.insertPrebookLine({
         prebook_uq,
@@ -109,6 +130,7 @@ async function createPrebook(location, type, lines, grower_name, dryRun=false) {
         sales_price:   line.box_price,
         qty_boxes:     line.qty_boxes,
         salesman_uq:   cfg.SALESMAN_UQ,
+        grower_uq,
       });
       console.log(`✅ ${p.description?.trim()}`);
       ok++;
