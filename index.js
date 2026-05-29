@@ -119,7 +119,9 @@ async function createPrebook(location, type, lines, grower_name, dryRun=false) {
       const up_x_pack  = type === 'BOX'   ? (line.units_x_box || 1) : 1;
       const packs_case = type === 'UNITS'  ? (line.units_x_box || 1) : 1;
       // Grower: only on UNITS prebook, not BOX/Everyday
-      const grower_uq  = type === 'UNITS'  ? growerUq : null;
+      // Use per-line grower if available, otherwise fall back to overall grower
+      const lineGrowerName = line.grower_name || grower_name;
+      const grower_uq  = type === 'UNITS'  ? findGrowerUq(lineGrowerName) : null;
 
       await flexy.insertPrebookLine({
         prebook_uq,
