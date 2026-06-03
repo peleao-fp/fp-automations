@@ -108,39 +108,50 @@ async function createPrebook(location, type, lines, grower_name, dryRun=false) {
   console.log(`   ✅ Prebook #${pbook_no} (${prebook_uq})`);
 
   let ok=0, fail=0;
+  const failedItems = [];
+
   for (const line of lines) {
     const searchTerm = extractSearchTerm(line.product_code);
     process.stdout.write(`   → ${searchTerm} (${line.qty_boxes}bx)... `);
     try {
       const p = await flexy.searchProduct(searchTerm);
-      if (!p) { console.log('NOT FOUND ⚠️'); fail++; continue; }
+      if (!p) {
+        console.log('NOT FOUND ⚠️');
+        failedItems.push({ product: line.product_code, reason: 'Product not found in Flexymax' });
+        fail++; continue;
+      }
 
       // Field mapping depends on type
-      const up_x_pack  = type === 'BOX'   ? (line.units_x_box || 1) : 1;
-      const packs_case = type === 'UNITS'  ? (line.units_x_box || 1) : 1;
+      const up_x_pack   = type === 'BOX'   ? (line.units_x_box || 1) : 1;
+      const packs_case  = type === 'UNITS'  ? (line.units_x_box || 1) : 1;
+      const sales_price = type === 'UNITS'  ? (line.unit_price || line.box_price) : line.box_price;
+      const case_uq     = type === 'UNITS'  ? cfg.CASE_UQ.UNIT : cfg.CASE_UQ.BOX;
       // Grower: only on UNITS prebook, not BOX/Everyday
-      // Use per-line grower if available, otherwise fall back to overall grower
       const lineGrowerName = line.grower_name || grower_name;
-      const grower_uq  = type === 'UNITS'  ? findGrowerUq(lineGrowerName) : null;
+      const grower_uq   = type === 'UNITS'  ? findGrowerUq(lineGrowerName) : null;
 
       await flexy.insertPrebookLine({
         prebook_uq,
         product_uq:    p.unico,
-        case_uq:       p.case_uq,
+        case_uq,
         up_x_pack,
         up_x_case:     packs_case,
-        sales_price:   line.box_price,
+        sales_price,
         qty_boxes:     line.qty_boxes,
         salesman_uq:   cfg.SALESMAN_UQ,
         grower_uq,
       });
       console.log(`✅ ${p.description?.trim()}`);
       ok++;
-    } catch(e) { console.log(`❌ ${e.message}`); fail++; }
+    } catch(e) {
+      console.log(`❌ ${e.message}`);
+      failedItems.push({ product: line.product_code, reason: e.message });
+      fail++;
+    }
   }
 
   console.log(`   Result: ${ok} OK, ${fail} failed`);
-  return { location, type, prebook_uq, pbook_no, ok, fail, success: true };
+  return { location, type, prebook_uq, pbook_no, ok, fail, success: true, failed_items: failedItems };
 }
 
 // Process one email → up to 2 prebooks (BOX + UNITS)
