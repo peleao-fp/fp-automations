@@ -78,7 +78,8 @@ function parseOneTable($, tbl) {
     if (!productStr) return;
 
     const qty     = parseNum(getColValue(row, 'suggested_bx', 'suggested', 'qty', 'quantity', 'order', 'boxes'));
-    const price   = parseNum(getColValue(row, 'box_price', 'price', 'unit_price', 'bp', 'cost'));
+    const price   = parseNum(getColValue(row, 'box_price', 'price', 'bp', 'cost'));
+    const uprice  = parseNum(getColValue(row, 'unit_price', 'unit_cost', 'price_unit', 'unitprice'));
     const max     = parseNum(getColValue(row, 'max', 'maximum'));
     const uxb     = parseNum(getColValue(row, 'units_x_box', 'units_x_case', 'units_per_box'));
 
@@ -90,6 +91,7 @@ function parseOneTable($, tbl) {
       product_code: productStr.trim(),
       qty_boxes:    qty > 0 ? qty : 1,
       box_price:    price,
+      unit_price:   uprice,
       units_x_box:  uxb,
       source:       getColValue(row, 'source', 'type').trim(),
       grower_name:  null, // filled in by parseAllTables
