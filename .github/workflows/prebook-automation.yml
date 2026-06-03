@@ -78,14 +78,15 @@ jobs:
             }
 
             const mapped = results.map(x => ({
-              location:   x.location   || '?',
-              type:       x.type       || '',
-              success:    x.success    || false,
-              pbook_no:   x.pbook_no   || '?',
-              prebook_uq: x.prebook_uq || '?',
-              ok:         x.ok         || 0,
-              fail:       x.fail       || 0,
-              error:      x.error      || null,
+              location:     x.location     || '?',
+              type:         x.type         || '',
+              success:      x.success      || false,
+              pbook_no:     x.pbook_no     || '?',
+              prebook_uq:   x.prebook_uq   || '?',
+              ok:           x.ok           || 0,
+              fail:         x.fail         || 0,
+              error:        x.error        || null,
+              failed_items: x.failed_items || [],
             }));
 
             const summary_html = mapped.length === 0
@@ -93,8 +94,17 @@ jobs:
               : mapped.map(x => {
                   const label = x.location + (x.type ? ' ' + x.type : '');
                   if (!x.success) return '<p>❌ FAILED ' + label + ': ' + (x.error||'Error') + '</p>';
-                  const warn = x.fail > 0 ? ' ⚠️ ' + x.fail + ' not found' : '';
-                  return '<p>✅ ' + label + ': Prebook #<b>' + x.pbook_no + '</b> — ' + x.ok + ' products OK' + warn + '</p>';
+                  let html = '<p>✅ ' + label + ': Prebook #<b>' + x.pbook_no + '</b> — ' + x.ok + ' products OK';
+                  if (x.fail > 0) {
+                    html += ' ⚠️ ' + x.fail + ' failed';
+                    if (x.failed_items && x.failed_items.length > 0) {
+                      html += '<br><small style="color:#cc0000">';
+                      html += x.failed_items.map(f => '• ' + f.product + ': ' + f.reason).join('<br>');
+                      html += '</small>';
+                    }
+                  }
+                  html += '</p>';
+                  return html;
                 }).join('');
 
             const content = JSON.stringify({
