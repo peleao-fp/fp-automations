@@ -15,6 +15,12 @@ module.exports = {
   SALESMAN_UQ:         'C9145113',
   SHIPPING_DAYS_AHEAD: 7,
 
+  // Case type UQs
+  CASE_UQ: {
+    UNIT: '8E4F15E3',  // UNIT case
+    BOX:  '0BFA95DF',  // BOX (BX) case
+  },
+
   // Products that go to BOX prebook (Everyday / glass items) — NO grower set
   BY_BOX_PRODUCTS: [
     'BUBBLE BALL 8 INCHES', 'BUBBLE BALL 6 INCHES', 'BUBBLE BALL 6"',
