@@ -36,7 +36,11 @@ function extractSearchTerm(s) {
   const parts = (s||'').trim().split(/\s+/);
   if (!parts.length) return '';
   const first = parts[0];
-  // Short letter-only prefix + numeric code → combine (e.g. "UN 616-24-07" → "UN616-24-07")
+  // "UN 616-24-07 ..." → strip UN prefix, use just the code
+  if (first.toUpperCase() === 'UN' && parts[1] && /\d/.test(parts[1])) {
+    return parts[1];
+  }
+  // Short letter-only prefix + numeric code → combine (e.g. "KL 616-24-07" → "KL616-24-07")
   if (first.length <= 3 && /^[A-Za-z]+$/.test(first) && parts[1] && /\d/.test(parts[1])) {
     return first + parts[1];
   }
