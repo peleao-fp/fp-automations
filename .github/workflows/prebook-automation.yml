@@ -11,6 +11,10 @@ on:
       gist_id:
         description: 'GitHub Gist ID with email body'
         required: true
+      run_key:
+        description: 'Unique key for this run'
+        required: false
+        default: ''
       dry_run:
         description: 'Dry run?'
         default: 'false'
@@ -39,8 +43,7 @@ jobs:
             const fs = require('fs');
             const d = JSON.parse(fs.readFileSync('/tmp/gist_response.json','utf8'));
             if (!d.files) { console.error('Gist error:', JSON.stringify(d).substring(0,200)); process.exit(1); }
-            const files = Object.values(d.files);
-            const content = files[0].content || '';
+            const content = Object.values(d.files)[0].content || '';
             fs.writeFileSync('/tmp/email_body.html', content);
             console.log('OK -', content.length, 'bytes');
           "
@@ -55,22 +58,24 @@ jobs:
             node index.js --subject "$SUBJECT" --html /tmp/email_body.html
           fi
 
-      - name: Save results to fixed Gist
+      - name: Save results to Gist
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
           SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
+          RUN_KEY: ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
         run: |
           node -e "
-            const fs   = require('fs');
+            const fs    = require('fs');
             const https = require('https');
 
-            const subject = process.env.SUBJECT || '';
-            const gistId  = process.env.RESULTS_GIST_ID;
-            const token   = process.env.GH_TOKEN;
+            const subject  = process.env.SUBJECT  || '';
+            const gistId   = process.env.RESULTS_GIST_ID;
+            const token    = process.env.GH_TOKEN;
+            const runKey   = process.env.RUN_KEY  || 'default';
+            const fileName = 'results_' + runKey + '.json';
 
-            // Read results file
             const files = fs.readdirSync('.').filter(f => f.startsWith('prebook-results-') && f.endsWith('.json'));
             let results = [];
             if (files.length > 0) {
@@ -98,7 +103,7 @@ jobs:
                   if (x.fail > 0) {
                     html += ' ⚠️ ' + x.fail + ' failed';
                     if (x.failed_items && x.failed_items.length > 0) {
-                      html += '<br><small style="color:#cc0000">';
+                      html += '<br><small style=\"color:#cc0000\">';
                       html += x.failed_items.map(f => '• ' + f.product + ': ' + f.reason).join('<br>');
                       html += '</small>';
                     }
@@ -107,15 +112,8 @@ jobs:
                   return html;
                 }).join('');
 
-            const content = JSON.stringify({
-              subject,
-              timestamp: new Date().toISOString(),
-              status: mapped.length > 0 && mapped.every(x => x.success) ? 'success' : mapped.length === 0 ? 'failed' : 'partial',
-              summary_html,
-              results: mapped,
-            }, null, 2);
-
-            const body = JSON.stringify({ files: { 'results.json': { content } } });
+            const content = JSON.stringify({ subject, timestamp: new Date().toISOString(), summary_html, results: mapped }, null, 2);
+            const body    = JSON.stringify({ files: { [fileName]: { content } } });
 
             const req = https.request({
               hostname: 'api.github.com',
@@ -132,8 +130,8 @@ jobs:
               let data = '';
               res.on('data', c => data += c);
               res.on('end', () => {
-                if (res.statusCode === 200) console.log('Results saved to Gist!');
-                else console.error('Gist update failed:', res.statusCode, data.substring(0, 200));
+                if (res.statusCode === 200) console.log('Saved:', fileName);
+                else console.error('Failed:', res.statusCode, data.substring(0,200));
               });
             });
             req.on('error', e => console.error('Error:', e.message));
