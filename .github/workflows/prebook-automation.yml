@@ -151,7 +151,7 @@ jobs:
           SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
           RECIPIENTS: ${{ github.event.client_payload.recipients || inputs.recipients }}
         run: |
-          node -e "
+          node --input-type=commonjs -e "
             const fs    = require('fs');
             const https = require('https');
 
@@ -214,16 +214,18 @@ jobs:
               });
             }
 
-            const gist = await fetchGist();
-            let existing = [];
-            try {
-              const f = gist.files?.['open_prebooks.json'];
-              if (f?.content) existing = JSON.parse(f.content);
-            } catch(e) {}
+            (async () => {
+              const gist = await fetchGist();
+              let existing = [];
+              try {
+                const f = gist.files?.['open_prebooks.json'];
+                if (f?.content) existing = JSON.parse(f.content);
+              } catch(e) {}
 
-            const updated = [...existing, ...newPrebooks];
-            const status  = await updateGist(JSON.stringify(updated, null, 2));
-            console.log('Tracking updated:', status, '— now tracking', updated.length, 'prebooks');
+              const updated = [...existing, ...newPrebooks];
+              const status  = await updateGist(JSON.stringify(updated, null, 2));
+              console.log('Tracking updated:', status, '— now tracking', updated.length, 'prebooks');
+            })().catch(e => { console.error('Tracking error:', e.message); process.exit(1); });
           "
 
       - name: Delete email Gist
