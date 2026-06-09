@@ -22,7 +22,7 @@ jobs:
           REMINDER_WEBHOOK_URL: ${{ secrets.REMINDER_WEBHOOK_URL }}
           ANON_ID: ba68aa44-49dc-4dbf-8145-864bb24cd52d
         run: |
-          node -e "
+          node --input-type=commonjs -e "
             const https = require('https');
 
             const gistId     = process.env.RESULTS_GIST_ID;
