@@ -15,6 +15,10 @@ on:
         description: 'Unique key for this run'
         required: false
         default: ''
+      recipients:
+        description: 'Email recipients for reminders'
+        required: false
+        default: ''
       dry_run:
         description: 'Dry run?'
         default: 'false'
@@ -137,6 +141,89 @@ jobs:
             req.on('error', e => console.error('Error:', e.message));
             req.write(body);
             req.end();
+          "
+
+      - name: Update prebook tracking
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+          SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
+          RECIPIENTS: ${{ github.event.client_payload.recipients || inputs.recipients }}
+        run: |
+          node -e "
+            const fs    = require('fs');
+            const https = require('https');
+
+            const gistId    = process.env.RESULTS_GIST_ID;
+            const token     = process.env.GH_TOKEN;
+            const subject   = process.env.SUBJECT   || '';
+            const recipients = process.env.RECIPIENTS || '';
+
+            // Read newly created prebooks from results file
+            const resFiles = fs.readdirSync('.').filter(f => f.startsWith('prebook-results-') && f.endsWith('.json'));
+            let newPrebooks = [];
+            if (resFiles.length > 0) {
+              try {
+                const results = JSON.parse(fs.readFileSync(resFiles[0], 'utf8'));
+                newPrebooks = results
+                  .filter(x => x.success && x.prebook_uq)
+                  .map(x => ({
+                    prebook_uq:  x.prebook_uq,
+                    pbook_no:    x.pbook_no,
+                    location:    x.location,
+                    type:        x.type,
+                    subject,
+                    recipients,
+                    created_at:  new Date().toISOString(),
+                  }));
+              } catch(e) { console.warn('Could not read results:', e.message); }
+            }
+
+            if (newPrebooks.length === 0) { console.log('No prebooks to track'); process.exit(0); }
+
+            // Read existing tracking list from Gist
+            function fetchGist() {
+              return new Promise((resolve, reject) => {
+                const req = https.request({
+                  hostname: 'api.github.com',
+                  path: '/gists/' + gistId,
+                  method: 'GET',
+                  headers: { 'Authorization': 'Bearer ' + token, 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json' }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+                });
+                req.on('error', reject); req.end();
+              });
+            }
+
+            function updateGist(content) {
+              return new Promise((resolve, reject) => {
+                const body = JSON.stringify({ files: { 'open_prebooks.json': { content } } });
+                const req = https.request({
+                  hostname: 'api.github.com',
+                  path: '/gists/' + gistId,
+                  method: 'PATCH',
+                  headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json', 'Content-Length': Buffer.byteLength(body) }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => resolve(res.statusCode));
+                });
+                req.on('error', reject); req.write(body); req.end();
+              });
+            }
+
+            const gist = await fetchGist();
+            let existing = [];
+            try {
+              const f = gist.files?.['open_prebooks.json'];
+              if (f?.content) existing = JSON.parse(f.content);
+            } catch(e) {}
+
+            const updated = [...existing, ...newPrebooks];
+            const status  = await updateGist(JSON.stringify(updated, null, 2));
+            console.log('Tracking updated:', status, '— now tracking', updated.length, 'prebooks');
           "
 
       - name: Delete email Gist
