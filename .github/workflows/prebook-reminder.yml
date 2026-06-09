@@ -1,0 +1,166 @@
+name: Prebook Reminder
+
+on:
+  schedule:
+    - cron: '0 21 * * *'  # 5 PM EDT (UTC-4) every day
+  workflow_dispatch: {}    # allow manual trigger for testing
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check open prebooks and send reminders
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+          REMINDER_WEBHOOK_URL: ${{ secrets.REMINDER_WEBHOOK_URL }}
+          ANON_ID: ba68aa44-49dc-4dbf-8145-864bb24cd52d
+        run: |
+          node -e "
+            const https = require('https');
+
+            const gistId     = process.env.RESULTS_GIST_ID;
+            const token      = process.env.GH_TOKEN;
+            const webhookUrl = process.env.REMINDER_WEBHOOK_URL;
+            const anonId     = process.env.ANON_ID;
+
+            // ── helpers ──────────────────────────────────────────────
+
+            function fetchGist() {
+              return new Promise((resolve, reject) => {
+                const req = https.request({
+                  hostname: 'api.github.com', path: '/gists/' + gistId, method: 'GET',
+                  headers: { 'Authorization': 'Bearer ' + token, 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json' }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+                });
+                req.on('error', reject); req.end();
+              });
+            }
+
+            function updateGist(content) {
+              return new Promise((resolve, reject) => {
+                const body = JSON.stringify({ files: { 'open_prebooks.json': { content } } });
+                const req = https.request({
+                  hostname: 'api.github.com', path: '/gists/' + gistId, method: 'PATCH',
+                  headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json', 'Content-Length': Buffer.byteLength(body) }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => resolve(res.statusCode));
+                });
+                req.on('error', reject); req.write(body); req.end();
+              });
+            }
+
+            function readPrebookHeader(prebook_uq) {
+              return new Promise((resolve, reject) => {
+                const b = '----R' + Date.now();
+                let body = '--' + b + '\r\nContent-Disposition: form-data; name=\"executeActionDTO\"\r\n\r\n';
+                body += JSON.stringify({ actionId: '659f60bcb185274a675b81e1', viewMode: true, paramProperties: { k0: { datatype: 'string', blobIdentifiers: [] } }, analyticsProperties: { isUserInitiated: false } });
+                body += '\r\n--' + b + '\r\nContent-Disposition: form-data; name=\"parameterMap\"\r\n\r\n';
+                body += JSON.stringify({ 'appsmith.store.lcPrebook_Uq': 'k0' });
+                body += '\r\n--' + b + '\r\nContent-Disposition: form-data; name=\"k0\"; filename=\"blob\"\r\nContent-Type: text/plain\r\n\r\n' + prebook_uq;
+                body += '\r\n--' + b + '--';
+                const buf = Buffer.from(body);
+                const req = https.request({
+                  hostname: 'app.flexymax.com', path: '/api/v1/actions/execute', method: 'POST',
+                  headers: { 'content-type': 'multipart/form-data; boundary=' + b, 'content-length': buf.length, 'accept': 'application/json', 'x-anonymous-user-id': anonId, 'x-appsmith-environmentid': 'unused_env', 'x-appsmith-version': 'v1.78', 'origin': 'https://app.flexymax.com' }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => { try { resolve(JSON.parse(d).data?.body?.[0]); } catch(e) { reject(e); } });
+                });
+                req.on('error', reject); req.write(buf); req.end();
+              });
+            }
+
+            function sendWebhook(payload) {
+              return new Promise((resolve, reject) => {
+                const body = JSON.stringify(payload);
+                const url  = new URL(webhookUrl);
+                const req  = https.request({
+                  hostname: url.hostname, path: url.pathname + url.search, method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => resolve(res.statusCode));
+                });
+                req.on('error', reject); req.write(body); req.end();
+              });
+            }
+
+            function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+            // ── main ─────────────────────────────────────────────────
+
+            const gist = await fetchGist();
+            let prebooks = [];
+            try {
+              const f = gist.files?.['open_prebooks.json'];
+              if (f?.content) prebooks = JSON.parse(f.content);
+            } catch(e) { console.log('No tracking file yet'); process.exit(0); }
+
+            if (prebooks.length === 0) { console.log('No prebooks to check'); process.exit(0); }
+
+            console.log('Checking', prebooks.length, 'tracked prebooks...');
+
+            const now         = Date.now();
+            const oneDayMs    = 24 * 60 * 60 * 1000;
+            const stillOpen   = [];
+            const toRemind    = [];
+
+            for (const pb of prebooks) {
+              try {
+                const header = await readPrebookHeader(pb.prebook_uq);
+                if (!header) { stillOpen.push(pb); continue; }
+
+                const isClosed = header.closed === true || header.status === 'CLOSED';
+                if (isClosed) {
+                  console.log('✅ Closed:', pb.pbook_no, pb.location, pb.type);
+                  continue; // remove from tracking
+                }
+
+                const age = now - new Date(pb.created_at).getTime();
+                stillOpen.push(pb);
+
+                if (age >= oneDayMs) {
+                  const days = Math.floor(age / oneDayMs);
+                  console.log('⚠️ Open', days, 'day(s):', pb.pbook_no, pb.location, pb.type);
+                  toRemind.push({ ...pb, days_open: days });
+                } else {
+                  console.log('🕐 Less than 1 day:', pb.pbook_no, pb.location, pb.type);
+                }
+              } catch(e) {
+                console.warn('Error checking', pb.prebook_uq, ':', e.message);
+                stillOpen.push(pb);
+              }
+              await delay(300);
+            }
+
+            // Update tracking Gist (remove closed prebooks)
+            await updateGist(JSON.stringify(stillOpen, null, 2));
+            console.log('Tracking updated:', stillOpen.length, 'still open');
+
+            // Send reminder webhook if there are open prebooks
+            if (toRemind.length > 0 && webhookUrl) {
+              const summary_html = toRemind.map(pb =>
+                '<p>⚠️ <b>' + pb.location + ' ' + pb.type + '</b> — Prebook #<b>' + pb.pbook_no + '</b> está aberto há <b>' + pb.days_open + ' dia(s)</b><br>' +
+                '<small>' + pb.subject + '</small></p>'
+              ).join('');
+
+              const status = await sendWebhook({
+                summary_html,
+                prebooks: toRemind,
+                type: 'reminder',
+              });
+              console.log('Reminder webhook sent:', status);
+            } else {
+              console.log('No reminders needed today');
+            }
+          "
