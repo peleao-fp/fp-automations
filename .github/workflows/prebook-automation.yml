@@ -43,7 +43,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             -o /tmp/gist_response.json
-          node -e "
+          node --input-type=commonjs -e "
             const fs = require('fs');
             const d = JSON.parse(fs.readFileSync('/tmp/gist_response.json','utf8'));
             if (!d.files) { console.error('Gist error:', JSON.stringify(d).substring(0,200)); process.exit(1); }
@@ -70,7 +70,7 @@ jobs:
           SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
           RUN_KEY: ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
         run: |
-          node -e "
+          node --input-type=commonjs -e "
             const fs    = require('fs');
             const https = require('https');
 
@@ -114,7 +114,8 @@ jobs:
                   }
                   html += '</p>';
                   return html;
-                }).join('');
+                }).join('') +
+                '<br><hr><p><small>💡 Para deletar os prebooks desta sugestão, responde <b>DELETE</b> neste email.</small></p>';
 
             const content = JSON.stringify({ subject, timestamp: new Date().toISOString(), summary_html, results: mapped }, null, 2);
             const body    = JSON.stringify({ files: { [fileName]: { content } } });
@@ -155,12 +156,11 @@ jobs:
             const fs    = require('fs');
             const https = require('https');
 
-            const gistId    = process.env.RESULTS_GIST_ID;
-            const token     = process.env.GH_TOKEN;
-            const subject   = process.env.SUBJECT   || '';
+            const gistId     = process.env.RESULTS_GIST_ID;
+            const token      = process.env.GH_TOKEN;
+            const subject    = process.env.SUBJECT    || '';
             const recipients = process.env.RECIPIENTS || '';
 
-            // Read newly created prebooks from results file
             const resFiles = fs.readdirSync('.').filter(f => f.startsWith('prebook-results-') && f.endsWith('.json'));
             let newPrebooks = [];
             if (resFiles.length > 0) {
@@ -182,7 +182,6 @@ jobs:
 
             if (newPrebooks.length === 0) { console.log('No prebooks to track'); process.exit(0); }
 
-            // Read existing tracking list from Gist
             function fetchGist() {
               return new Promise((resolve, reject) => {
                 const req = https.request({
