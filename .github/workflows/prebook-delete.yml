@@ -1,0 +1,166 @@
+name: Prebook Delete
+
+on:
+  repository_dispatch:
+    types: [prebook-delete]
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: 'Original email subject'
+        required: true
+      run_key:
+        description: 'Unique key for results'
+        required: false
+        default: ''
+
+jobs:
+  delete-prebooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Delete prebooks by subject
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+          SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
+          RUN_KEY: ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
+          ANON_ID: ba68aa44-49dc-4dbf-8145-864bb24cd52d
+        run: |
+          node --input-type=commonjs -e "
+            const https = require('https');
+
+            const gistId  = process.env.RESULTS_GIST_ID;
+            const token   = process.env.GH_TOKEN;
+            const subject = process.env.SUBJECT || '';
+            const runKey  = process.env.RUN_KEY  || 'default';
+            const anonId  = process.env.ANON_ID;
+
+            // Clean subject (strip RE:, [teste], etc.)
+            const cleanSubject = subject.replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
+            console.log('Looking for prebooks matching:', cleanSubject);
+
+            function fetchGist() {
+              return new Promise((resolve, reject) => {
+                const req = https.request({
+                  hostname: 'api.github.com', path: '/gists/' + gistId, method: 'GET',
+                  headers: { 'Authorization': 'Bearer ' + token, 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json' }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+                });
+                req.on('error', reject); req.end();
+              });
+            }
+
+            function updateGist(files) {
+              return new Promise((resolve, reject) => {
+                const body = JSON.stringify({ files });
+                const req = https.request({
+                  hostname: 'api.github.com', path: '/gists/' + gistId, method: 'PATCH',
+                  headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'User-Agent': 'fp-automations', 'Accept': 'application/vnd.github.v3+json', 'Content-Length': Buffer.byteLength(body) }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => resolve(res.statusCode));
+                });
+                req.on('error', reject); req.write(body); req.end();
+              });
+            }
+
+            function deletePrebook(prebook_uq) {
+              return new Promise((resolve, reject) => {
+                const b = '----D' + Date.now();
+                const dto = JSON.stringify({ actionId: '659f60bcb185274a675b8205', viewMode: true, paramProperties: { k0: { datatype: 'string', blobIdentifiers: [] } }, analyticsProperties: { isUserInitiated: false } });
+                const pm  = JSON.stringify({ 'appsmith.store.lcPrebook_Uq': 'k0' });
+                let body = '--' + b + '\r\nContent-Disposition: form-data; name=\"executeActionDTO\"\r\n\r\n' + dto;
+                body += '\r\n--' + b + '\r\nContent-Disposition: form-data; name=\"parameterMap\"\r\n\r\n' + pm;
+                body += '\r\n--' + b + '\r\nContent-Disposition: form-data; name=\"k0\"; filename=\"blob\"\r\nContent-Type: text/plain\r\n\r\n' + prebook_uq;
+                body += '\r\n--' + b + '--';
+                const buf = Buffer.from(body);
+                const req = https.request({
+                  hostname: 'app.flexymax.com', path: '/api/v1/actions/execute', method: 'POST',
+                  headers: { 'content-type': 'multipart/form-data; boundary=' + b, 'content-length': buf.length, 'accept': 'application/json', 'x-anonymous-user-id': anonId, 'x-appsmith-environmentid': 'unused_env', 'x-appsmith-version': 'v1.78', 'origin': 'https://app.flexymax.com' }
+                }, res => {
+                  let d = ''; res.on('data', c => d += c);
+                  res.on('end', () => { try { resolve(JSON.parse(d).data?.body?.[0]); } catch(e) { reject(e); } });
+                });
+                req.on('error', reject); req.write(buf); req.end();
+              });
+            }
+
+            function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+            (async () => {
+              // Read tracking Gist
+              const gist = await fetchGist();
+              let prebooks = [];
+              try {
+                const f = gist.files?.['open_prebooks.json'];
+                if (f?.content) prebooks = JSON.parse(f.content);
+              } catch(e) {}
+
+              // Find matching prebooks by subject
+              const toDelete = prebooks.filter(pb => {
+                const pbSubject = (pb.subject || '').replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
+                return pbSubject === cleanSubject || pb.subject?.toUpperCase().includes(cleanSubject.substring(0, 20));
+              });
+
+              console.log('Found', toDelete.length, 'prebook(s) to delete');
+
+              if (toDelete.length === 0) {
+                console.log('No matching prebooks found in tracking');
+                const content = JSON.stringify({ summary_html: '<p>⚠️ No prebooks found for this suggestion.</p>', subject, deleted: [], run_key: runKey }, null, 2);
+                await updateGist({ ['results_' + runKey + '.json']: { content } });
+                process.exit(0);
+              }
+
+              // Delete each prebook
+              const deleted = [];
+              const failed  = [];
+
+              for (const pb of toDelete) {
+                process.stdout.write('Deleting ' + pb.location + ' ' + pb.type + ' #' + pb.pbook_no + ' (' + pb.prebook_uq + ')... ');
+                try {
+                  const res = await deletePrebook(pb.prebook_uq);
+                  if (res && !res.error) {
+                    console.log('✅');
+                    deleted.push(pb);
+                  } else {
+                    console.log('❌', JSON.stringify(res)?.substring(0, 80));
+                    failed.push({ ...pb, error: JSON.stringify(res) });
+                  }
+                } catch(e) {
+                  console.log('❌', e.message);
+                  failed.push({ ...pb, error: e.message });
+                }
+                await delay(300);
+              }
+
+              // Remove deleted prebooks from tracking
+              const remaining = prebooks.filter(pb => !deleted.find(d => d.prebook_uq === pb.prebook_uq));
+
+              // Build summary
+              let summary_html = '<h3>🗑️ Prebooks deletados</h3>';
+              if (deleted.length > 0) {
+                summary_html += deleted.map(pb =>
+                  '<p>✅ <b>' + pb.location + ' ' + pb.type + '</b> — Prebook #<b>' + pb.pbook_no + '</b> deletado com sucesso</p>'
+                ).join('');
+              }
+              if (failed.length > 0) {
+                summary_html += '<p>❌ Falhou: ' + failed.map(pb => pb.location + ' #' + pb.pbook_no).join(', ') + '</p>';
+              }
+
+              // Save results + update tracking
+              const resultContent = JSON.stringify({ summary_html, subject, deleted, failed, run_key: runKey }, null, 2);
+              await updateGist({
+                ['results_' + runKey + '.json']: { content: resultContent },
+                'open_prebooks.json':             { content: JSON.stringify(remaining, null, 2) }
+              });
+
+              console.log('Done! Deleted:', deleted.length, '| Failed:', failed.length);
+            })().catch(e => { console.error('Fatal:', e.message); process.exit(1); });
+          "
