@@ -160,7 +160,7 @@ jobs:
                     process.stdout.write('  Deleting line ' + lineUq + '... ');
                     try {
                       const res = await deleteLine(lineUq);
-                      const ok  = res?.data?.isExecutionSuccess !== false && !res?.data?.body?.[0]?.message;
+                      const ok  = res?.data?.isExecutionSuccess !== false && res?.data?.body?.[0]?.error === false;
                       if (ok) { console.log('✅'); }
                       else    { console.log('❌', JSON.stringify(res?.data?.body?.[0])?.substring(0, 80)); lineErrors++; }
                     } catch(e) {
@@ -179,7 +179,7 @@ jobs:
                   // Step 3: Delete the prebook header
                   process.stdout.write('  Deleting header... ');
                   const res = await deleteHeader(pb.prebook_uq);
-                  const ok  = res?.data?.isExecutionSuccess !== false && !res?.data?.body?.[0]?.message;
+                  const ok  = res?.data?.isExecutionSuccess !== false && res?.data?.body?.[0]?.error === false;
                   if (ok) {
                     console.log('✅');
                     deleted.push(pb);
