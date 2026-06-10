@@ -12,6 +12,10 @@ on:
         description: 'Unique key for results'
         required: false
         default: ''
+      delete_type:
+        description: 'ALL, BOX or UNITS'
+        required: false
+        default: 'ALL'
 
 jobs:
   delete-prebooks:
@@ -29,6 +33,7 @@ jobs:
           RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
           SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
           RUN_KEY: ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
+          DELETE_TYPE: ${{ github.event.client_payload.delete_type || inputs.delete_type || 'ALL' }}
           ANON_ID: ba68aa44-49dc-4dbf-8145-864bb24cd52d
           SALESMAN_UQ: C9145113
         run: |
@@ -41,9 +46,10 @@ jobs:
             const runKey     = process.env.RUN_KEY  || 'default';
             const anonId     = process.env.ANON_ID;
             const salesmanUq = process.env.SALESMAN_UQ;
+            const deleteType = (process.env.DELETE_TYPE || 'ALL').toUpperCase();
 
             const cleanSubject = subject.replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
-            console.log('Looking for prebooks matching:', cleanSubject);
+            console.log('Looking for prebooks matching:', cleanSubject, '| type:', deleteType);
 
             function flexymax(actionId, parameterMap, kvPairs) {
               return new Promise((resolve, reject) => {
@@ -130,7 +136,13 @@ jobs:
 
               const toDelete = prebooks.filter(pb => {
                 const pbSubj = (pb.subject || '').replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
-                return pbSubj === cleanSubject || pbSubj.includes(cleanSubject.substring(0, 20)) || cleanSubject.includes(pbSubj.substring(0, 20));
+                const subjMatch = pbSubj === cleanSubject || pbSubj.includes(cleanSubject.substring(0, 20)) || cleanSubject.includes(pbSubj.substring(0, 20));
+                if (!subjMatch) return false;
+                if (deleteType === 'ALL') return true;
+                const pbType = (pb.type || '').toUpperCase();
+                if (deleteType === 'BOX') return pbType.startsWith('BOX');
+                if (deleteType === 'UNITS' || deleteType === 'UNIT') return pbType.startsWith('UNIT');
+                return true;
               });
 
               console.log('Found', toDelete.length, 'prebook(s) to delete');
