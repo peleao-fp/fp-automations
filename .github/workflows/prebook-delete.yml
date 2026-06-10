@@ -8,6 +8,10 @@ on:
       subject:
         description: 'Original email subject'
         required: true
+      email_body:
+        description: 'Email body (HTML) to extract prebook numbers from'
+        required: false
+        default: ''
       run_key:
         description: 'Unique key for results'
         required: false
@@ -32,6 +36,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
           SUBJECT: ${{ github.event.client_payload.subject || inputs.subject }}
+          EMAIL_BODY: ${{ github.event.client_payload.email_body || inputs.email_body }}
           RUN_KEY: ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
           DELETE_TYPE: ${{ github.event.client_payload.delete_type || inputs.delete_type || 'ALL' }}
           ANON_ID: ba68aa44-49dc-4dbf-8145-864bb24cd52d
@@ -43,13 +48,23 @@ jobs:
             const gistId     = process.env.RESULTS_GIST_ID;
             const token      = process.env.GH_TOKEN;
             const subject    = process.env.SUBJECT || '';
+            const emailBody  = process.env.EMAIL_BODY || '';
             const runKey     = process.env.RUN_KEY  || 'default';
             const anonId     = process.env.ANON_ID;
             const salesmanUq = process.env.SALESMAN_UQ;
             const deleteType = (process.env.DELETE_TYPE || 'ALL').toUpperCase();
 
-            const cleanSubject = subject.replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
-            console.log('Looking for prebooks matching:', cleanSubject, '| type:', deleteType);
+            // Extract pbook_no numbers from email body HTML
+            // Format in email: Prebook #<b>209694</b>
+            const pbookNos = [];
+            const regex = /Prebook\s+#<b>(\d+)<\/b>/gi;
+            let match;
+            while ((match = regex.exec(emailBody)) !== null) {
+              pbookNos.push(parseInt(match[1], 10));
+            }
+
+            console.log('Email body pbook_nos found:', pbookNos);
+            console.log('delete_type:', deleteType);
 
             function flexymax(actionId, parameterMap, kvPairs) {
               return new Promise((resolve, reject) => {
@@ -134,13 +149,22 @@ jobs:
                 if (f?.content) prebooks = JSON.parse(f.content);
               } catch(e) {}
 
+              // Filter by pbook_no found in email body, then by delete_type
               const toDelete = prebooks.filter(pb => {
-                const pbSubj = (pb.subject || '').replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
-                const subjMatch = pbSubj === cleanSubject || pbSubj.includes(cleanSubject.substring(0, 20)) || cleanSubject.includes(pbSubj.substring(0, 20));
-                if (!subjMatch) return false;
+                // Must match one of the pbook_nos extracted from the email
+                if (pbookNos.length > 0 && !pbookNos.includes(pb.pbook_no)) return false;
+
+                // If no pbook_nos found in email (fallback), use subject matching
+                if (pbookNos.length === 0) {
+                  const cleanSubject = subject.replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
+                  const pbSubj = (pb.subject || '').replace(/^(RE:\s*|\[.*?\]\s*)*/i, '').trim().toUpperCase();
+                  if (pbSubj !== cleanSubject && !pbSubj.includes(cleanSubject.substring(0, 20)) && !cleanSubject.includes(pbSubj.substring(0, 20))) return false;
+                }
+
+                // Filter by type
                 if (deleteType === 'ALL') return true;
                 const pbType = (pb.type || '').toUpperCase();
-                if (deleteType === 'BOX') return pbType.startsWith('BOX');
+                if (deleteType === 'BOX')  return pbType.startsWith('BOX');
                 if (deleteType === 'UNITS' || deleteType === 'UNIT') return pbType.startsWith('UNIT');
                 return true;
               });
@@ -148,7 +172,7 @@ jobs:
               console.log('Found', toDelete.length, 'prebook(s) to delete');
 
               if (toDelete.length === 0) {
-                const content = JSON.stringify({ summary_html: '<p>⚠️ Nenhum prebook encontrado para esta sugestão.</p>', subject, deleted: [], failed: [], run_key: runKey }, null, 2);
+                const content = JSON.stringify({ summary_html: '<p>⚠️ Nenhum prebook encontrado para deletar.</p>', subject, deleted: [], failed: [], run_key: runKey }, null, 2);
                 await updateGist({ ['results_' + runKey + '.json']: { content } });
                 process.exit(0);
               }
