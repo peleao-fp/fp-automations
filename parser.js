@@ -69,12 +69,12 @@ function parseOneTable($, tbl) {
       headers = cells.map(normalizeHeader);
       return;
     }
-    if (!headers.some(h => h === 'product' || h === 'product_name')) return;
+    if (!headers.some(h => h === 'product' || h === 'product_name' || h === 'productdisplay_description')) return;
 
     const row = {};
     headers.forEach((h, idx) => { row[h] = cells[idx] || ''; });
 
-    const productStr = getColValue(row, 'product', 'product_name', 'description', 'item');
+    const productStr = getColValue(row, 'product', 'product_name', 'productdisplay_description', 'description', 'item');
     if (!productStr) return;
 
     const qty     = parseNum(getColValue(row, 'suggested_bx', 'suggested', 'qty', 'quantity', 'order', 'boxes'));
