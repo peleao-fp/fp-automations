@@ -1,7 +1,6 @@
 module.exports = {
   FLEXYMAX_BASE_URL: 'https://app.flexymax.com/api/v1/actions/execute',
   ANONYMOUS_USER_ID: 'ba68aa44-49dc-4dbf-8145-864bb24cd52d',
-
   ACTIONS: {
     SEARCH_PRODUCT:   '659f60bcb185274a675b81e0',
     CREATE_PREBOOK:   '659f60bcb185274a675b81fc',
@@ -11,17 +10,12 @@ module.exports = {
     DATE_TO_JULIAN:   '659f60bcb185274a675b8201',
     GET_GROWERS:      '659f60bcb185274a675b8204',
   },
-
   SALESMAN_UQ:         'C9145113',
   SHIPPING_DAYS_AHEAD: 7,
-
-  // Case type UQs
   CASE_UQ: {
-    UNIT: '8E4F15E3',  // UNIT case
-    BOX:  '0BFA95DF',  // BOX (BX) case
+    UNIT: '8E4F15E3',
+    BOX:  '0BFA95DF',
   },
-
-  // Products that go to BOX prebook (Everyday / glass items) — NO grower set
   BY_BOX_PRODUCTS: [
     'BUBBLE BALL 8 INCHES', 'BUBBLE BALL 6 INCHES', 'BUBBLE BALL 6"',
     'BUBBLE BALL 10INCH', 'BUBBLE BALL 10 INCHES',
@@ -32,44 +26,39 @@ module.exports = {
     'CYLINDER 6 INCHES', 'CYLINDER 6 INCHES - 6 X 6',
     'ROSE VASE 8 INCHES',
   ],
-
-  // Grower name (from email) → system UQ
-  // Matching is case-insensitive, partial match on the email grower name
   GROWER_MAP: [
-    { match: ['SYNDICATE'],                  uq: '1B5CCCF3', name: 'SYNDICATE SALES' },
-    { match: ['WD IMPORT', 'WD '],           uq: '08A2D2A6', name: 'WD IMPORTS' },
-    { match: ['SMITHER', 'OASIS'],           uq: '6E2B3D86', name: 'SMITHERSOASIS' },
-    { match: ['GIFTWARES'],                  uq: 'D9450855', name: 'GIFTWARES' },
-    { match: ['DESIGN MASTER'],              uq: null,       name: 'DESIGN MASTER (not in system yet)' },
-    { match: ['CANDLE ARTISAN', 'P GARCIA'], uq: '2045435D', name: 'CANDLE ARTISANS INC.' },
-    { match: ['SUPERMOSS'],                  uq: 'D6B8EF3E', name: 'SUPERMOSS' },
-    { match: ['NATURAL STAR'],               uq: '50B755A0', name: 'NATURAL STAR' },
-    { match: ['PLUS ONE'],                   uq: '4C5E1971', name: 'PLUS ONE IMPORTS' },
-    { match: ['VANGUARD'],                   uq: '70388A61', name: 'VANGUARD PLASTICS' },
-    { match: ['CTI'],                        uq: 'C32E0C7D', name: 'CTI INDUSTRIES' },
-    { match: ['VICKERMAN'],                  uq: '3AD9E8DE', name: 'VICKERMAN' },
-    { match: ['LEO'],                        uq: 'FFEFF335', name: 'LEO UHLFELDER' },
-    { match: ['POTTERY'],                    uq: 'FF84FAF7', name: 'POTTERY POTS' },
-    { match: ['KNUD NIELSEN'],               uq: '7421AD9B', name: 'KNUD NIELSEN' },
-    { match: ['WGV'],                        uq: '5372BC0F', name: 'WGV INTERNATIONAL' },
-    { match: ['DESIGN 88'],                  uq: '9623893C', name: 'DESIGN 88' },
-    { match: ['UCI', 'UNLIMITED CONTAINER'], uq: 'B82A8142', name: 'UNLIMITED CONTAINERS' },
-    { match: ['DIAMOND LINE'],               uq: '0CC69DDB', name: 'DIAMOND LINE' },
-    { match: ['CANPOL'],                     uq: 'DAC531E3', name: 'CANPOL' },
-    { match: ['K AND M', 'K&M NURSERY'],     uq: '78E76B4F', name: 'K AND M NURSERY' },
+    { match: ['SYNDICATE'],                      uq: '1B5CCCF3', name: 'SYNDICATE SALES' },
+    { match: ['WD IMPORT', 'WD '],               uq: '08A2D2A6', name: 'WD IMPORTS' },
+    { match: ['SMITHER', 'OASIS'],               uq: '6E2B3D86', name: 'SMITHERSOASIS' },
+    { match: ['GIFTWARES'],                      uq: 'D9450855', name: 'GIFTWARES' },
+    { match: ['DESIGN MASTER'],                  uq: null,       name: 'DESIGN MASTER (not in system yet)' },
+    { match: ['CANDLE ARTISAN', 'P GARCIA'],     uq: '2045435D', name: 'CANDLE ARTISANS INC.' },
+    { match: ['SUPERMOSS'],                      uq: 'D6B8EF3E', name: 'SUPERMOSS' },
+    { match: ['NATURAL STAR'],                   uq: '50B755A0', name: 'NATURAL STAR' },
+    { match: ['PLUS ONE'],                       uq: '4C5E1971', name: 'PLUS ONE IMPORTS' },
+    { match: ['VANGUARD'],                       uq: '70388A61', name: 'VANGUARD PLASTICS' },
+    { match: ['CTI'],                            uq: 'C32E0C7D', name: 'CTI INDUSTRIES' },
+    { match: ['VICKERMAN'],                      uq: '3AD9E8DE', name: 'VICKERMAN' },
+    { match: ['LEO'],                            uq: 'FFEFF335', name: 'LEO UHLFELDER' },
+    { match: ['POTTERY'],                        uq: 'FF84FAF7', name: 'POTTERY POTS' },
+    { match: ['KNUD NIELSEN'],                   uq: '7421AD9B', name: 'KNUD NIELSEN' },
+    { match: ['WGV'],                            uq: '5372BC0F', name: 'WGV INTERNATIONAL' },
+    { match: ['DESIGN 88'],                      uq: '9623893C', name: 'DESIGN 88' },
+    { match: ['UCI', 'UNLIMITED CONTAINER'],     uq: 'B82A8142', name: 'UNLIMITED CONTAINERS' },
+    { match: ['DIAMOND LINE'],                   uq: '0CC69DDB', name: 'DIAMOND LINE' },
+    { match: ['CANPOL'],                         uq: 'DAC531E3', name: 'CANPOL' },
+    { match: ['K AND M', 'K&M NURSERY'],         uq: '78E76B4F', name: 'K AND M NURSERY' },
     { match: ['FLORA AND MORE', 'FLORA & MORE'], uq: 'EF1DA8E7', name: 'FLORA AND MORE' },
-    { match: ['SCHUSTER'],                   uq: 'C51909F1', name: 'SCHUSTERS OF TEXAS' },
-    { match: ['RELIANT RIBBON'],             uq: '6E3D70B3', name: 'RELIANT RIBBON' },
+    { match: ['SCHUSTER'],                       uq: 'C51909F1', name: 'SCHUSTERS OF TEXAS' },
+    { match: ['RELIANT RIBBON'],                 uq: '6E3D70B3', name: 'RELIANT RIBBON' },
   ],
-
-  // Full location config (UNITS + BOX) with hardcoded carriers and warehouses
   LOCATIONS: {
     FLL: {
       UNITS: {
         label:        'Full Pot FLL - Unit HardGoods (3045)',
         customer_uq:  '8D53FD6B',
         shipto_uq:    '37BC4BF7',
-        carrier_uq:   'VIY57130',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    'ICPU0328',
         terms_uq:     'C768DD5B',
       },
@@ -77,7 +66,7 @@ module.exports = {
         label:        'Full Pot FLL - Box HardGoods (1187)',
         customer_uq:  'D800E473',
         shipto_uq:    'CE7C32A1',
-        carrier_uq:   'VIY57130',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    'R8Y24414',
         terms_uq:     '729D291F',
       },
@@ -87,7 +76,7 @@ module.exports = {
         label:        'WPB HardGoods Units (4341)',
         customer_uq:  '8D96D3B2',
         shipto_uq:    '6C230940',
-        carrier_uq:   '5T156327',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    '9EVR0098',
         terms_uq:     'C768DD5B',
       },
@@ -95,7 +84,7 @@ module.exports = {
         label:        'WPB HardGoods Boxes (4340)',
         customer_uq:  '5A95DB7D',
         shipto_uq:    '7F9666BD',
-        carrier_uq:   '5T156327',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    '9EVR0098',
         terms_uq:     'C768DD5B',
       },
@@ -105,7 +94,7 @@ module.exports = {
         label:        'Naples HardGoods Units (5272)',
         customer_uq:  '9A8B3BB3',
         shipto_uq:    '36357CDB',
-        carrier_uq:   'FJRC8519',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    '23L79975',
         terms_uq:     'C768DD5B',
       },
@@ -113,7 +102,7 @@ module.exports = {
         label:        'Naples HardGoods Boxes (5271)',
         customer_uq:  '54EA7737',
         shipto_uq:    '73D93C8C',
-        carrier_uq:   'FJRC8519',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    '23L79975',
         terms_uq:     'C768DD5B',
       },
@@ -123,7 +112,7 @@ module.exports = {
         label:        'HG Units MCO - Orlando (6299)',
         customer_uq:  'BC0FED72',
         shipto_uq:    'D3101F70',
-        carrier_uq:   '52YK8077',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    'TJL56186',
         terms_uq:     'C768DD5B',
       },
@@ -131,13 +120,12 @@ module.exports = {
         label:        'HG Boxes MCO - Orlando (6300)',
         customer_uq:  '634994FD',
         shipto_uq:    'B2AFE63D',
-        carrier_uq:   '52YK8077',
+        carrier_uq:   'DNKT7342',
         whouse_uq:    'U6539357',
         terms_uq:     'C768DD5B',
       },
     },
   },
-
   LOCATION_KEYWORDS: {
     FLL: ['FLL', 'FORT LAUDERDALE', 'LAUDERDALE', 'PMP', 'POMPANO'],
     WPB: ['WPB', 'WEST PALM', 'PALM BEACH'],
