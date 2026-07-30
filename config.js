@@ -28,6 +28,11 @@ module.exports = {
     '48-75-09 18INCH CARDETTE CRYSTAL', '17-12-09 CRYSTAL 11INCH DESIGNER TRAY - OPENING: 10.7/8INCH',
     'LOMEY',
   ],
+  // Extra BOX keywords that apply to a single location only.
+  // Matched against the product description, same as BY_BOX_PRODUCTS.
+  BY_BOX_PRODUCTS_BY_LOCATION: {
+    WPB: ['FOAM', 'CAGE', 'LOMEY', 'DESIGNER DISH'],
+  },
   GROWER_MAP: [
     { match: ['SYNDICATE'],                      uq: '1B5CCCF3', name: 'SYNDICATE SALES' },
     { match: ['WD IMPORT', 'WD '],               uq: '08A2D2A6', name: 'WD IMPORTS' },

@@ -10,9 +10,13 @@ function formatDate(d) {
 function addDays(d, n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 
 // Check if a product belongs to BOX prebook
-function isBoxProduct(productStr) {
+function isBoxProduct(productStr, location) {
   const name = (productStr||'').trim().toUpperCase();
-  return cfg.BY_BOX_PRODUCTS.some(p => name.includes(p.toUpperCase()));
+  const keywords = [
+    ...cfg.BY_BOX_PRODUCTS,
+    ...((location && cfg.BY_BOX_PRODUCTS_BY_LOCATION?.[location]) || []),
+  ];
+  return keywords.some(p => name.includes(p.toUpperCase()));
 }
 
 // Look up grower UQ from email grower name
@@ -165,8 +169,8 @@ async function processEmail(data, dryRun=false) {
   if (!cfg.LOCATIONS[location]) throw new Error(`No config for location: ${location}`);
 
   // Split lines into BOX and UNITS groups
-  const boxLines   = lines.filter(l => isBoxProduct(l.product_code));
-  const unitsLines = lines.filter(l => !isBoxProduct(l.product_code));
+  const boxLines   = lines.filter(l => isBoxProduct(l.product_code, location));
+  const unitsLines = lines.filter(l => !isBoxProduct(l.product_code, location));
 
   console.log(`\n🌍 ${location}: ${boxLines.length} BOX products, ${unitsLines.length} UNITS products`);
 
