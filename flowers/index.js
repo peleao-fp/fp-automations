@@ -63,14 +63,20 @@ async function findProduct(line) {
       || exact[0];
 }
 
+// Case_sh (QB, HB, BX...) → case unico, loaded from Flexymax
+async function loadCaseMap() {
+  const rows = await flexy.getCases();
+  return Object.fromEntries(rows.map(c => [collapseSpaces(c.case_sh).toUpperCase(), c.unico]));
+}
+
 // Line values come from the suggestion, never from the product catalog.
 // Flexymax add-line form: PxCase = up_x_case, UxPack = up_x_pack,
 // UxCase = stem_pack ? UxPack × PxCase : PxCase, TotalUnits = UxCase × BoxQty.
-function lineFields(line, p) {
+function lineFields(line, p, caseMap) {
   const up_x_case = line.bunches_x_box;
   const up_x_pack = Math.round((line.units_x_box / line.bunches_x_box) * 100) / 100;
   return {
-    case_uq:        cfg.CASE_UQ,
+    case_uq:        caseMap[line.case_sh],
     qty_boxes:      line.qty_boxes,
     up_x_case,
     up_x_pack,
@@ -80,19 +86,21 @@ function lineFields(line, p) {
 }
 
 // Reasons a suggestion line can't be booked as-is
-function lineProblems(line) {
+function lineProblems(line, caseMap) {
   const problems = [];
+  if (!line.case_sh)                  problems.push('Case_sh vazio na sugestão');
+  else if (!caseMap[line.case_sh])    problems.push(`Case_sh "${line.case_sh}" não existe no Flexymax`);
   if (!(line.units_x_box > 0))   problems.push('Units_x_box vazio na sugestão');
   if (!(line.bunches_x_box > 0)) problems.push('Bunches_x_box vazio na sugestão');
   return problems;
 }
 
-async function resolveLines(lines) {
+async function resolveLines(lines, caseMap) {
   const resolved = [];
   const failed   = [];
   for (const line of lines) {
     process.stdout.write(`   → ${line.product} (${line.qty_boxes}bx)... `);
-    const problems = lineProblems(line);
+    const problems = lineProblems(line, caseMap);
     if (problems.length) {
       console.log(`SKIPPED ⚠️ ${problems.join(', ')}`);
       failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: problems.join(', ') });
@@ -105,8 +113,8 @@ async function resolveLines(lines) {
         failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: 'Descrição exata não encontrada no Flexymax' });
         continue;
       }
-      const f = lineFields(line, p);
-      console.log(`✅ ${collapseSpaces(p.description)}${p.active ? '' : ' INACTIVE'} | BoxQty ${f.qty_boxes} PxCase ${f.up_x_case} UxPack ${f.up_x_pack} UxCase ${f.units_per_case} Price $${f.sales_price}`);
+      const f = lineFields(line, p, caseMap);
+      console.log(`✅ ${collapseSpaces(p.description)}${p.active ? '' : ' INACTIVE'} | ${line.case_sh} BoxQty ${f.qty_boxes} PxCase ${f.up_x_case} UxPack ${f.up_x_pack} UxCase ${f.units_per_case} Price $${f.sales_price}`);
       resolved.push({ line, product: p });
     } catch (e) {
       console.log(`❌ ${e.message}`);
@@ -118,7 +126,7 @@ async function resolveLines(lines) {
 
 // ── prebook ──────────────────────────────────────────────────
 
-async function createPrebook(resolved, dates) {
+async function createPrebook(resolved, dates, caseMap) {
   const pb = cfg.PREBOOK;
   const julian = await flexy.dateToJulian(dates.shipping_date);
 
@@ -157,7 +165,7 @@ async function createPrebook(resolved, dates) {
       await flexy.insertPrebookLine({
         prebook_uq,
         product_uq:  p.unico,
-        ...lineFields(line, p),
+        ...lineFields(line, p, caseMap),
         salesman_uq: rootCfg.SALESMAN_UQ,
         grower_uq:   null,
       });
@@ -216,7 +224,8 @@ async function run(args, result) {
   console.log(`📅 PB date (delivery): ${dates.pb_date} | Shipping: ${dates.shipping_date}`);
 
   console.log('\n🔎 Matching products');
-  const { resolved, failed } = await resolveLines(parsed.lines);
+  const caseMap = await loadCaseMap();
+  const { resolved, failed } = await resolveLines(parsed.lines, caseMap);
   result.failed_items.push(...failed);
 
   if (!resolved.length) throw new Error('No product from the email was found in Flexymax — prebook not created');
@@ -229,7 +238,7 @@ async function run(args, result) {
     Object.assign(result, { success: true, pbook_no: 0, prebook_uq: 'DRY_RUN', ok: resolved.length });
   } else {
     console.log('\n📦 Creating prebook');
-    const pb = await createPrebook(resolved, dates);
+    const pb = await createPrebook(resolved, dates, caseMap);
     result.failed_items.push(...pb.failed);
     Object.assign(result, { success: true, pbook_no: pb.pbook_no, prebook_uq: pb.prebook_uq, ok: pb.ok });
   }

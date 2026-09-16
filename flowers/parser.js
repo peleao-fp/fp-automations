@@ -48,6 +48,7 @@ function parseOneTable($, tbl) {
     lines.push({
       product,
       qty_boxes:     qty,
+      case_sh:       (row.case_sh || '').toUpperCase(),
       units_x_box:   parseQty(row.units_x_box),
       bunches_x_box: parseQty(row.bunches_x_box),
       unit_price:    priceKey ? parseQty(row[priceKey]) : 0,

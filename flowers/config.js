@@ -25,9 +25,6 @@ module.exports = {
   SHIP_DAYS_BEFORE_DELIVERY: 1,
   TIMEZONE:                  'America/New_York',
 
-  // Line case is always BX; box contents and price come from the suggestion table
-  CASE_UQ:                   '0BFA95DF',   // BX
-
   // How many search results to scan for the exact description
   PRODUCT_SEARCH_PAGE_SIZE:  50,
 };

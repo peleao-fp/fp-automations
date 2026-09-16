@@ -80,6 +80,11 @@ async function searchProduct(searchText) {
   return rows[0] || null; // first match
 }
 
+// All case types → [{ case_sh, case_name, unico, ... }]
+async function getCases() {
+  return callAction(cfg.ACTIONS.GET_CASES, {}, {});
+}
+
 // Convert date string → Julian integer
 async function dateToJulian(dateStr) {
   const rows = await callAction(
@@ -265,6 +270,7 @@ module.exports = {
   readPrebookHeader,
   searchProduct,
   searchProducts,
+  getCases,
   dateToJulian,
   getDefaultCarrier,
   getShipAddress,

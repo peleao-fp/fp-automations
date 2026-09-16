@@ -9,6 +9,7 @@ module.exports = {
     GET_SHIP_ADDRESS: '659f60bcb185274a675b820a',
     DATE_TO_JULIAN:   '659f60bcb185274a675b8201',
     GET_GROWERS:      '659f60bcb185274a675b8204',
+    GET_CASES:        '659f60bcb185274a675b81ef',
   },
   SALESMAN_UQ:         'C9145113',
   SHIPPING_DAYS_AHEAD: 7,
