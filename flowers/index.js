@@ -63,11 +63,41 @@ async function findProduct(line) {
       || exact[0];
 }
 
+// Line values come from the suggestion, never from the product catalog.
+// Flexymax add-line form: PxCase = up_x_case, UxPack = up_x_pack,
+// UxCase = stem_pack ? UxPack × PxCase : PxCase, TotalUnits = UxCase × BoxQty.
+function lineFields(line, p) {
+  const up_x_case = line.bunches_x_box;
+  const up_x_pack = Math.round((line.units_x_box / line.bunches_x_box) * 100) / 100;
+  return {
+    case_uq:        cfg.CASE_UQ,
+    qty_boxes:      line.qty_boxes,
+    up_x_case,
+    up_x_pack,
+    units_per_case: p.stem_pack === false ? up_x_case : line.units_x_box,
+    sales_price:    line.unit_price,
+  };
+}
+
+// Reasons a suggestion line can't be booked as-is
+function lineProblems(line) {
+  const problems = [];
+  if (!(line.units_x_box > 0))   problems.push('Units_x_box vazio na sugestão');
+  if (!(line.bunches_x_box > 0)) problems.push('Bunches_x_box vazio na sugestão');
+  return problems;
+}
+
 async function resolveLines(lines) {
   const resolved = [];
   const failed   = [];
   for (const line of lines) {
     process.stdout.write(`   → ${line.product} (${line.qty_boxes}bx)... `);
+    const problems = lineProblems(line);
+    if (problems.length) {
+      console.log(`SKIPPED ⚠️ ${problems.join(', ')}`);
+      failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: problems.join(', ') });
+      continue;
+    }
     try {
       const p = await findProduct(line);
       if (!p) {
@@ -75,7 +105,8 @@ async function resolveLines(lines) {
         failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: 'Descrição exata não encontrada no Flexymax' });
         continue;
       }
-      console.log(`✅ ${collapseSpaces(p.description)} [${collapseSpaces(p.case_sh)} ${p.up_x_case}x${p.up_x_pack}${p.active ? '' : ' INACTIVE'}]`);
+      const f = lineFields(line, p);
+      console.log(`✅ ${collapseSpaces(p.description)}${p.active ? '' : ' INACTIVE'} | BoxQty ${f.qty_boxes} PxCase ${f.up_x_case} UxPack ${f.up_x_pack} UxCase ${f.units_per_case} Price $${f.sales_price}`);
       resolved.push({ line, product: p });
     } catch (e) {
       console.log(`❌ ${e.message}`);
@@ -126,11 +157,7 @@ async function createPrebook(resolved, dates) {
       await flexy.insertPrebookLine({
         prebook_uq,
         product_uq:  p.unico,
-        case_uq:     p.case_uq,
-        up_x_pack:   p.up_x_pack || 1,
-        up_x_case:   p.up_x_case || 1,
-        sales_price: p.sales_price || 0,
-        qty_boxes:   line.qty_boxes,
+        ...lineFields(line, p),
         salesman_uq: rootCfg.SALESMAN_UQ,
         grower_uq:   null,
       });
@@ -194,6 +221,10 @@ async function run(args, result) {
 
   if (!resolved.length) throw new Error('No product from the email was found in Flexymax — prebook not created');
 
+  result.warnings = resolved
+    .filter(({ line }) => !(line.unit_price > 0))
+    .map(({ line }) => ({ product: line.product, reason: 'Sem "Last sale price" na sugestão — entrou com preço 0' }));
+
   if (dryRun) {
     Object.assign(result, { success: true, pbook_no: 0, prebook_uq: 'DRY_RUN', ok: resolved.length });
   } else {
@@ -223,4 +254,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { computeDates, findProduct };
+module.exports = { computeDates, findProduct, lineFields };

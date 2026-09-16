@@ -46,6 +46,11 @@ function buildSummaryHtml(r, runUrl) {
       + r.failed_items.map(f => `• ${esc(f.product)} (${esc(f.qty_boxes)} bx): ${esc(f.reason)}`).join('<br>')
       + '</p>';
   }
+  if (r.warnings?.length) {
+    html += '<p style="color:#b36b00"><b>⚠️ Conferir:</b><br>'
+      + r.warnings.map(w => `• ${esc(w.product)}: ${esc(w.reason)}`).join('<br>')
+      + '</p>';
+  }
   if (r.skipped_items?.length) {
     html += '<p><small>Ignorados (Suggested_BX 0): '
       + r.skipped_items.map(s => esc(s.product)).join(', ') + '</small></p>';

@@ -10,7 +10,7 @@ function collapseSpaces(s) {
   return (s || '').replace(/\s+/g, ' ').trim();
 }
 
-// Integer box qty; anything not a positive number → 0 (line is skipped)
+// Number from a cell ("$11.43", "14"); anything not numeric → 0
 function parseQty(val) {
   const n = parseFloat(String(val || '').replace(/[^\d.\-]/g, ''));
   return isNaN(n) ? 0 : n;
@@ -42,11 +42,17 @@ function parseOneTable($, tbl) {
       return;
     }
 
+    // "Last sale price (unit)" → last_sale_price_unit
+    const priceKey = headers.find(h => h.startsWith('last_sale_price'));
+
     lines.push({
       product,
-      qty_boxes: qty,
-      type:      row.type   || '',
-      source:    row.source || '',
+      qty_boxes:     qty,
+      units_x_box:   parseQty(row.units_x_box),
+      bunches_x_box: parseQty(row.bunches_x_box),
+      unit_price:    priceKey ? parseQty(row[priceKey]) : 0,
+      type:          row.type   || '',
+      source:        row.source || '',
     });
   });
 
