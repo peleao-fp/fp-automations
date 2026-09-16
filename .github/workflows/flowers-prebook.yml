@@ -1,0 +1,73 @@
+name: Flowers Prebook (OM Miami 1158)
+
+# Triggered by the Power Automate flow "prebook automation FLOWERS"
+# when "OM Miami - FLOWERS SUGGESTED" arrives.
+on:
+  repository_dispatch:
+    types: [flowers-prebook-trigger]
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: 'Email subject'
+        required: true
+        default: 'OM Miami - FLOWERS SUGGESTED'
+      gist_id:
+        description: 'GitHub Gist ID with email body'
+        required: true
+      run_key:
+        description: 'Unique key for this run'
+        required: false
+        default: ''
+      recipients:
+        description: 'Email recipients'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run? (looks products up, creates nothing)'
+        default: false
+        type: boolean
+
+jobs:
+  flowers-prebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Inputs go through env (never interpolated into scripts)
+    env:
+      GH_TOKEN:        ${{ secrets.GH_TOKEN }}
+      RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+      SUBJECT:         ${{ github.event.client_payload.subject || inputs.subject }}
+      EMAIL_GIST_ID:   ${{ github.event.client_payload.gist_id || inputs.gist_id }}
+      RUN_KEY:         ${{ github.event.client_payload.run_key || inputs.run_key || github.run_id }}
+      RECIPIENTS:      ${{ github.event.client_payload.recipients || inputs.recipients }}
+      DRY_RUN:         ${{ github.event.client_payload.dry_run || inputs.dry_run }}
+      GITHUB_RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+
+      - name: Create prebook
+        run: |
+          FLAGS=""
+          if [ "$DRY_RUN" = "true" ]; then FLAGS="--dry-run"; fi
+          node flowers/index.js --gist "$EMAIL_GIST_ID" --subject "$SUBJECT" --out flowers-result.json $FLAGS
+
+      - name: Publish results for Power Automate
+        if: always()
+        run: node flowers/report.js flowers-result.json
+
+      - name: Delete email Gist
+        if: always()
+        run: |
+          if [ -n "$EMAIL_GIST_ID" ]; then
+            node -e "require('./flowers/gist').deleteGist(process.env.EMAIL_GIST_ID).then(()=>console.log('Email gist deleted'))"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flowers-result-${{ github.run_id }}
+          path: flowers-result.json
+          retention-days: 30

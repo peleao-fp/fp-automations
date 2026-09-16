@@ -61,17 +61,22 @@ async function callAction(actionId, parameterMap, values) {
 
 // ── public functions ──────────────────────────────────────────
 
-// Search product by code/description → returns first match
-async function searchProduct(searchText) {
-  const rows = await callAction(
+// Search products by code/description → returns all rows of the first page
+async function searchProducts(searchText, pageSize = 10) {
+  return callAction(
     cfg.ACTIONS.SEARCH_PRODUCT,
     {
       'tblPrebookProductList.pageSize': 'k0',
       'tblPrebookProductList.pageNo':   'k1',
       'inputSearchProducts.inputText':  'k2',
     },
-    { k0: 10, k1: 1, k2: searchText }
+    { k0: pageSize, k1: 1, k2: searchText }
   );
+}
+
+// Search product by code/description → returns first match
+async function searchProduct(searchText) {
+  const rows = await searchProducts(searchText);
   return rows[0] || null; // first match
 }
 
@@ -259,6 +264,7 @@ async function insertPrebookLine(params) {
 module.exports = {
   readPrebookHeader,
   searchProduct,
+  searchProducts,
   dateToJulian,
   getDefaultCarrier,
   getShipAddress,
