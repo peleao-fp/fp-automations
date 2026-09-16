@@ -16,43 +16,43 @@ function buildSummaryHtml(r, runUrl) {
   const logs = runUrl ? `<p><small>Logs: <a href="${esc(runUrl)}">${esc(runUrl)}</a></small></p>` : '';
 
   if (!r.success) {
-    return `<h3>❌ ${esc(cfg.NAME)} — prebook NÃO criado</h3>`
-      + `<p><b>Erro:</b> ${esc(r.error || 'Erro desconhecido')}</p>` + logs;
+    return `<h3>❌ ${esc(cfg.NAME)} — prebook NOT created</h3>`
+      + `<p><b>Error:</b> ${esc(r.error || 'Unknown error')}</p>` + logs;
   }
 
   const title = r.dry_run
-    ? `🧪 ${esc(cfg.NAME)} — DRY RUN (nada foi criado)`
-    : `✅ ${esc(cfg.NAME)} — prebook pronto para fechar`;
+    ? `🧪 ${esc(cfg.NAME)} — DRY RUN (nothing was created)`
+    : `✅ ${esc(cfg.NAME)} — prebook ready to close`;
 
   let html = `<h3>${title}</h3>`;
   if (!r.dry_run) {
     html += `<p>✅ ${esc(r.location)} ${esc(r.type)}: Prebook #<b>${esc(r.pbook_no)}</b> — ${r.ok} products OK`
       + (r.fail ? ` ⚠️ ${r.fail} failed` : '') + '</p>';
   } else {
-    html += `<p>${r.ok} produtos encontrados no Flexymax</p>`;
+    html += `<p>${r.ok} products found in Flexymax</p>`;
   }
 
   const boxesOk = r.expected_boxes == null || r.expected_boxes === r.total_boxes;
   html += '<p>'
-    + `<b>Cliente:</b> ${esc(r.customer)}<br>`
+    + `<b>Customer:</b> ${esc(r.customer)}<br>`
     + `<b>Carrier:</b> ${esc(r.carrier)}<br>`
-    + `<b>PB date (entrega):</b> ${esc(r.pb_date)} &nbsp;|&nbsp; <b>Shipping:</b> ${esc(r.shipping_date)}<br>`
-    + `<b>Caixas na tabela:</b> ${esc(r.total_boxes)}`
-    + (r.expected_boxes != null ? ` (email diz ${esc(r.expected_boxes)})${boxesOk ? '' : ' ⚠️ diferente'}` : '')
+    + `<b>PB date (delivery):</b> ${esc(r.pb_date)} &nbsp;|&nbsp; <b>Shipping:</b> ${esc(r.shipping_date)}<br>`
+    + `<b>Boxes in table:</b> ${esc(r.total_boxes)}`
+    + (r.expected_boxes != null ? ` (email says ${esc(r.expected_boxes)})${boxesOk ? '' : ' ⚠️ mismatch'}` : '')
     + '</p>';
 
   if (r.failed_items?.length) {
-    html += '<p style="color:#cc0000"><b>⚠️ Não entraram no prebook — adicionar manualmente:</b><br>'
+    html += '<p style="color:#cc0000"><b>⚠️ Not added to the prebook — add manually:</b><br>'
       + r.failed_items.map(f => `• ${esc(f.product)} (${esc(f.qty_boxes)} bx): ${esc(f.reason)}`).join('<br>')
       + '</p>';
   }
   if (r.warnings?.length) {
-    html += '<p style="color:#b36b00"><b>⚠️ Conferir:</b><br>'
+    html += '<p style="color:#b36b00"><b>⚠️ Please check:</b><br>'
       + r.warnings.map(w => `• ${esc(w.product)}: ${esc(w.reason)}`).join('<br>')
       + '</p>';
   }
   if (r.skipped_items?.length) {
-    html += '<p><small>Ignorados (Suggested_BX 0): '
+    html += '<p><small>Skipped (Suggested_BX 0): '
       + r.skipped_items.map(s => esc(s.product)).join(', ') + '</small></p>';
   }
   return html + logs;

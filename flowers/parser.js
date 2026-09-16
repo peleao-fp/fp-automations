@@ -63,7 +63,8 @@ function parseOneTable($, tbl) {
 // "OM MIAMI — suggested order (customer 1158) — 26 boxes"
 function parseTitle(text) {
   const customer = text.match(/customer\s*#?\s*(\d+)/i);
-  const boxes    = text.match(/(\d+)\s*boxes/i);
+  // Only the count right after "(customer N) —", not any "N boxes" elsewhere in the email
+  const boxes    = text.match(/customer\s*#?\s*\d+\s*\)?\s*[-–—:|]*\s*(\d+)\s*boxes/i);
   return {
     customer_no:    customer ? parseInt(customer[1], 10) : null,
     expected_boxes: boxes    ? parseInt(boxes[1], 10)    : null,

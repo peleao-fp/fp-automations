@@ -88,10 +88,10 @@ function lineFields(line, p, caseMap) {
 // Reasons a suggestion line can't be booked as-is
 function lineProblems(line, caseMap) {
   const problems = [];
-  if (!line.case_sh)                  problems.push('Case_sh vazio na sugestão');
-  else if (!caseMap[line.case_sh])    problems.push(`Case_sh "${line.case_sh}" não existe no Flexymax`);
-  if (!(line.units_x_box > 0))   problems.push('Units_x_box vazio na sugestão');
-  if (!(line.bunches_x_box > 0)) problems.push('Bunches_x_box vazio na sugestão');
+  if (!line.case_sh)                  problems.push('Case_sh is empty in the suggestion');
+  else if (!caseMap[line.case_sh])    problems.push(`Case_sh "${line.case_sh}" does not exist in Flexymax`);
+  if (!(line.units_x_box > 0))   problems.push('Units_x_box is empty in the suggestion');
+  if (!(line.bunches_x_box > 0)) problems.push('Bunches_x_box is empty in the suggestion');
   return problems;
 }
 
@@ -110,7 +110,7 @@ async function resolveLines(lines, caseMap) {
       const p = await findProduct(line);
       if (!p) {
         console.log('NOT FOUND ⚠️');
-        failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: 'Descrição exata não encontrada no Flexymax' });
+        failed.push({ product: line.product, qty_boxes: line.qty_boxes, reason: 'Exact description not found in Flexymax' });
         continue;
       }
       const f = lineFields(line, p, caseMap);
@@ -232,7 +232,7 @@ async function run(args, result) {
 
   result.warnings = resolved
     .filter(({ line }) => !(line.unit_price > 0))
-    .map(({ line }) => ({ product: line.product, reason: 'Sem "Last sale price" na sugestão — entrou com preço 0' }));
+    .map(({ line }) => ({ product: line.product, reason: 'No "Last sale price" in the suggestion — booked at price 0' }));
 
   if (dryRun) {
     Object.assign(result, { success: true, pbook_no: 0, prebook_uq: 'DRY_RUN', ok: resolved.length });
