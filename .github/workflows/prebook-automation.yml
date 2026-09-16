@@ -26,6 +26,8 @@ on:
 
 jobs:
   create-prebooks:
+    # FLOWERS SUGGESTED emails belong to flowers-prebook.yml
+    if: ${{ !contains(format('{0}', github.event.client_payload.subject || inputs.subject), 'FLOWERS') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
