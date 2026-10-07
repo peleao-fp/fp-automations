@@ -26,6 +26,33 @@ function matchGrowerFromText(text) {
   return entry ? text.trim() : null;
 }
 
+// ── Noise filters ─────────────────────────────────────────────
+// The suggestion emails wrap the product tables in boilerplate that must never be
+// read as a grower section or as a product line: the vendor website line, the
+// "Vendor minimum / order, N stores" note, "No Items", and the TOTAL / GRAND TOTAL
+// summary rows that close each table.
+const TOTALS_LABEL = /^\s*(grand\s+total|sub\s*-?\s*total|total(\s+geral)?)\b/i;
+
+const NOISE_PATTERNS = [
+  /\bwebsite\b/i,
+  /\bvendor\s+minimum\b/i,
+  /\bno\s+items\b/i,
+  /\breached\b/i,
+  /\bcost\s*\$/i,
+  /\border\b[\s\S]*\bstores\b/i,
+  /https?:\/\//i,
+];
+
+function isTotalsLabel(text) {
+  return TOTALS_LABEL.test(String(text || '').trim());
+}
+
+function isNoiseText(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  return isTotalsLabel(t) || NOISE_PATTERNS.some(re => re.test(t));
+}
+
 function extractCode(s) {
   const parts = (s||'').trim().split(/\s+/);
   if (!parts.length) return '';
@@ -77,6 +104,9 @@ function parseOneTable($, tbl) {
     const productStr = getColValue(row, 'product', 'product_name', 'productdisplay_description', 'description', 'item');
     if (!productStr) return;
 
+    // "TOTAL" / "GRAND TOTAL" rows and in-table notes are summaries, not products
+    if (isNoiseText(productStr)) return;
+
     const qty     = parseNum(getColValue(row, 'suggested_bx', 'suggested', 'qty', 'quantity', 'order', 'boxes'));
     const price   = parseNum(getColValue(row, 'box_price', 'price', 'bp', 'cost'));
     const uprice  = parseNum(getColValue(row, 'unit_price', 'unit_cost', 'price_unit', 'unitprice'));
@@ -120,8 +150,9 @@ function parseAllTables(html) {
     // Extract text of this element (excluding nested tables)
     const directText = $(el).clone().find('table').remove().end().text().trim();
 
-    // Check if this element is a potential grower header
-    if (directText && directText.length >= 2 && directText.length <= 80) {
+    // Check if this element is a potential grower header.
+    // Header boilerplate (website line, vendor-minimum note, totals) is never a grower.
+    if (directText && directText.length >= 2 && directText.length <= 80 && !isNoiseText(directText)) {
       const isHeader =
         ['b', 'strong', 'h1', 'h2', 'h3', 'h4'].includes(tag) ||
         $(el).children('b, strong').text().trim() === directText ||
@@ -161,4 +192,4 @@ function parseEmail(subject, htmlBody) {
   };
 }
 
-module.exports = { detectLocation, parseAllTables, parseEmail, extractCode, matchGrowerFromText };
+module.exports = { detectLocation, parseAllTables, parseEmail, extractCode, matchGrowerFromText, isNoiseText, isTotalsLabel };
