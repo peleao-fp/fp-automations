@@ -1,0 +1,53 @@
+name: Pedidos diários (Holex / EZ / Anton)
+
+on:
+  schedule:
+    - cron: '20 20 * * 1-5'   # 4:20 PM Miami no horário de verão (EDT)
+    - cron: '20 21 * * 1-5'   # 4:20 PM Miami no horário padrão (EST) / reserva no verão
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Data de embarque (YYYY-MM-DD) — vazio = automática'
+        required: false
+      mode:
+        description: 'dry-run (só gera PDF) | test (envia só para o Pedro) | real'
+        required: true
+        default: 'test'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install reportlab requests holidays
+
+      - name: Gerar e enviar
+        env:
+          RESEND_API_KEY:  ${{ secrets.RESEND_API_KEY }}
+          GH_TOKEN:        ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
+          # Agendado: usa a variável do repositório DAILY_ORDERS_MODE (padrão "test" até o Pedro liberar)
+          MODE: ${{ github.event_name == 'schedule' && (vars.DAILY_ORDERS_MODE || 'test') || inputs.mode }}
+          DATE: ${{ inputs.date }}
+        run: |
+          ARGS=""
+          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --respect-clock"
+          [ -n "$DATE" ] && ARGS="$ARGS --date $DATE"
+          case "$MODE" in
+            dry-run) ARGS="$ARGS --dry-run" ;;
+            test)    ARGS="$ARGS --test" ;;
+            real)    ;;
+            *) echo "MODE inválido: $MODE"; exit 1 ;;
+          esac
+          python orders/daily_orders.py $ARGS
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pedidos-${{ github.run_id }}
+          path: out/
+          retention-days: 30
