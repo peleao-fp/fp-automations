@@ -28,8 +28,8 @@ jobs:
         env:
           RESEND_API_KEY:   ${{ secrets.RESEND_API_KEY }}
           FULLPOTOS_COOKIE: ${{ secrets.FULLPOTOS_COOKIE }}
-          # Agendado: começa em teste (só o Pedro recebe) até a variável FARM_ORDERS_MODE = real
-          MODE: ${{ github.event_name == 'schedule' && (vars.FARM_ORDERS_MODE || 'test') || inputs.mode }}
+          # Agendado: vai direto para o Valerii com cópia para o Pedro. Para pausar: variável FARM_ORDERS_MODE = test ou dry-run
+          MODE: ${{ github.event_name == 'schedule' && (vars.FARM_ORDERS_MODE || 'real') || inputs.mode }}
           DATE: ${{ inputs.date }}
         run: |
           H=$(TZ=America/New_York date +%H)

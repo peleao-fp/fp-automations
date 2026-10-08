@@ -46,8 +46,8 @@ def fp_get(path):
     return r.json()
 
 def collect(day):
-    """{prefixo: [linhas]} das 7 fazendas, juntando Purchase Control e Inventory Entry."""
-    out = {p: [] for p in FARMS}
+    """({prefixo: [linhas]}, aviso) das 7 fazendas, juntando Purchase Control e Inventory Entry."""
+    out = {p: [] for p in FARMS}; warn = None
     po_units = set()
     for p in api_get(f"/api/purchase-orders?ship_date={day.isoformat()}&grower_uq=%25&product_uq=%25").get("data", []):
         pref = (p.get("grower_po") or "").split("-")[0]
@@ -62,28 +62,31 @@ def collect(day):
             "total": int(d.get("total_units") or 0), "preco": float(d.get("po_price") or 0),
             "confirmado": int(d.get("qty_confirm") or 0) >= int(d.get("qty_porder") or 0),
             "notas": " ".join((d.get("details") or "").split()).strip(". ")})
-    for a in fp_get(f"/api/inventory-entry/awb-by-date?date={day.isoformat()}") or []:
+    try: awbs = fp_get(f"/api/inventory-entry/awb-by-date?date={day.isoformat()}") or []
+    except Exception as e:
+        awbs = []; warn = f"Inventory Entry not included ({e}) — Purchase Control only"; print("  ATENÇÃO:", warn)
+    for a in awbs:
         awb = (a.get("awbcode") or "").strip()
         for b in fp_get(f"/api/inventory-entry/packing-box-by-awb?awbcode={awb}") or []:
             pref = BY_UQ.get((b.get("grower_uq") or "").strip())
             if not pref or b.get("porder_uq") in po_units: continue   # já veio pelo PO
             cust = int(b.get("customer") or 0)
             out[pref].append({
-                "origem": "Inventory Entry", "ref": f"Lote {b.get('lote')} · AWB {awb}", "fp": (b.get("box_id") or "").strip(),
-                "cliente": f"Cliente {cust}" if cust else "ESTOQUE", "produto": " ".join((b.get("description") or "").split()),
+                "origem": "Inventory Entry", "ref": f"Lot {b.get('lote')} · AWB {awb}", "fp": (b.get("box_id") or "").strip(),
+                "cliente": f"Customer {cust}" if cust else "STOCK", "produto": " ".join((b.get("description") or "").split()),
                 "caixa": CASE_NAMES.get((b.get("case_sh") or "").strip(), (b.get("case_sh") or "").strip()),
                 "qtd": int(b.get("box_qty") or 0), "bunches": int(b.get("tunits_x_box") or 0), "ux": 1,
                 "total": int(b.get("total_units") or 0), "preco": float(b.get("f_cost_x_u") or 0), "confirmado": True,
                 "notas": " ".join((b.get("inventory_notes") or "").split())})
-    return out
+    return out, warn
 
 def build_xlsx(path, farm, day, lines):
     thin = Side(style="thin", color="999999"); box = Border(left=thin, right=thin, top=thin, bottom=thin)
     wb = Workbook(); ws = wb.active; ws.title = "Pedidos"
     ws["A1"] = f"FULL POT  ·  {farm}"; ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = f"Pedidos para {day:%A, %m/%d/%Y}"; ws["A2"].font = Font(bold=True, size=12, color="C00000")
-    cols = ["Origem", "PO / Lote", "Box Mark", "Cliente", "Produto", "Caixa", "Qtd cx", "Bunches/cx", "Unid./bunch",
-            "Total unid.", "Custo x U", "Total $", "Confirmado", "Notas"]
+    ws["A2"] = f"Orders for {day:%A, %m/%d/%Y}"; ws["A2"].font = Font(bold=True, size=12, color="C00000")
+    cols = ["Source", "PO / Lot", "Box Mark", "Customer", "Product", "Case", "Boxes", "Bunches/Box", "Units/Bunch",
+            "Total Units", "Cost x U", "Total $", "Confirmed", "Notes"]
     r = 4
     for c, n in enumerate(cols, 1):
         cell = ws.cell(r, c, n); cell.font = Font(bold=True, color="FFFFFF"); cell.border = box
@@ -92,7 +95,7 @@ def build_xlsx(path, farm, day, lines):
     for l in sorted(lines, key=lambda l: (l["origem"] != "Purchase Control", l["cliente"], l["produto"])):
         r += 1; tot = round(l["total"] * l["preco"], 2); tq += l["qtd"]; tt += tot
         vals = [l["origem"], l["ref"], l["fp"], l["cliente"], l["produto"], l["caixa"], l["qtd"], l["bunches"], l["ux"],
-                l["total"], l["preco"], tot, "SIM" if l["confirmado"] else "NÃO", l["notas"]]
+                l["total"], l["preco"], tot, "YES" if l["confirmado"] else "NO", l["notas"]]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v); cell.border = box
             if c in (11, 12): cell.number_format = "#,##0.00"
@@ -116,7 +119,7 @@ def main():
     now = datetime.now(MIAMI)
     day = date.fromisoformat(a.date) if a.date else next_friday(now.date())
     print(f"Hoje (Miami): {now:%a %Y-%m-%d %H:%M} → pedidos de {day:%a %Y-%m-%d}")
-    orders = collect(day)
+    orders, warn = collect(day)
     os.makedirs(a.out, exist_ok=True)
     files, resumo, vazias = [], [], []
     for pref, (_, farm) in FARMS.items():
@@ -125,14 +128,15 @@ def main():
         path = os.path.join(a.out, f"{farm} - {day:%b} {ordinal(day.day)}.xlsx")
         q, t = build_xlsx(path, farm, day, lines); files.append(path)
         npc = sum(1 for l in lines if l["origem"] == "Purchase Control")
-        resumo.append(f"{farm}: {q} cx, ${t:,.2f} ({npc} do Purchase Control, {len(lines)-npc} do Inventory Entry)")
+        resumo.append(f"{farm}: {q} boxes, ${t:,.2f} ({npc} from Purchase Control, {len(lines)-npc} from Inventory Entry)")
         print("  " + resumo[-1] + f" → {path}")
     if vazias: print("  sem pedido: " + ", ".join(vazias))
     if a.dry_run or not files: return
     subject = f"California farms for {day:%A} {day:%b} {ordinal(day.day)}"
-    body = ("<p>Valerii,</p><p>Seguem os pedidos das fazendas para " + f"{day:%m/%d}" + ", um arquivo por fazenda:</p><ul>" +
+    body = ("<p>Valerii,</p><p>Attached are the farm orders for " + f"{day:%A %m/%d}" + ", one file per farm:</p><ul>" +
             "".join(f"<li>{s}</li>" for s in resumo) + "</ul>" +
-            (f"<p>Sem pedido: {', '.join(vazias)}.</p>" if vazias else ""))
+            (f"<p>No orders: {', '.join(vazias)}.</p>" if vazias else "") +
+            (f"<p><b>Note:</b> {warn}.</p>" if warn else ""))
     to, cc = (BUYER_CC, []) if a.test else (TO, BUYER_CC)
     if a.test: subject = "TESTE — " + subject + f" (iria para: {', '.join(TO)})"
     atts = []
