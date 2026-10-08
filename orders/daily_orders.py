@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Pedidos diários — Holex / EZ Flower / Anton Spaargaren.
+Pedidos diários aos fornecedores — Holex, EZ Flower, Anton, My Orchids, Diemme.
 
-Todo dia útil às 4:20 PM (Miami) lê os POs da data de embarque (hoje +2; sexta → terça),
-gera um PDF por fornecedor no formato do relatório "PURCHASE ORDERS" e envia pelo Resend,
-com cópia para o comprador.
+Todo dia útil às 4:20 PM (Miami) lê os POs da data de embarque de cada fornecedor (regra em VENDORS)
+e envia pelo Resend, com cópia para o comprador:
+  - Holex/EZ/Anton: PDF anexo no formato do relatório "PURCHASE ORDERS" (hoje +2; sexta → terça)
+  - My Orchids/Diemme: tabela no corpo do email (quarta → domingo; sexta → terça/quinta)
 
 Uso:
   python orders/daily_orders.py                   # data automática, envia
-  python orders/daily_orders.py --date 2026-10-09 # força a data de embarque
+  python orders/daily_orders.py --date 2026-10-09 # força a data de embarque (todos os fornecedores)
+  python orders/daily_orders.py --vendor MOY,DME  # só esses fornecedores
   python orders/daily_orders.py --dry-run         # só gera os PDFs em ./out, não envia
   python orders/daily_orders.py --test            # envia só para o comprador, assunto "TESTE"
   python orders/daily_orders.py --respect-clock   # só roda entre 16:15 e 17:59 em Miami (cron)
@@ -30,11 +32,21 @@ MIAMI    = ZoneInfo("America/New_York")
 
 FROM_EMAIL = "Pedro Leão - Full Pot <pedro@fullpot.com>"
 BUYER_CC   = ["pedro@fullpot.com"]
-# Prefixo do grower_po → fornecedor (emails confirmados pelo Pedro em 2026-10-07)
+# Prefixo do grower_po → fornecedor (emails confirmados pelo Pedro em 2026-10-07).
+# rule: "plus2" = Seg–Qui +2 dias, Sex → terça; ou {dia do envio: dia do embarque} (0=seg … 6=dom).
+# format: "pdf" = relatório PURCHASE ORDERS anexo; "table" = tabela no corpo do email (como colar do Excel).
 VENDORS = {
-    "HFW": {"name": "HOLEX - HOLLAND",  "short": "HFW", "to": ["ricky.van.tol@holex.com"]},
-    "EZF": {"name": "EZ FLOWER",        "short": "EZF", "to": ["danielp@ezflower.nl"]},
-    "ANS": {"name": "ANTON SPAARGAREN", "short": "ANS", "to": ["g.de.beer@antonspaargaren.nl"]},
+    "HFW": {"name": "HOLEX - HOLLAND",  "to": ["ricky.van.tol@holex.com"],      "rule": "plus2", "format": "pdf"},
+    "EZF": {"name": "EZ FLOWER",        "to": ["danielp@ezflower.nl"],          "rule": "plus2", "format": "pdf"},
+    "ANS": {"name": "ANTON SPAARGAREN", "to": ["g.de.beer@antonspaargaren.nl"], "rule": "plus2", "format": "pdf"},
+    "MOY": {"name": "MY ORCHIDS", "to": ["order@myorchids.net", "piyawan@nnorchid.com"],
+            "rule": {2: 6, 4: 1}, "format": "table",       # quarta → domingo, sexta → terça
+            "columns": [("pccode", "box_mark"), ("description", "product"), ("qty_porder", "qty"),
+                        ("bunches_case", "bunches"), ("units_bunch", "ux_bunch"), ("total_units", "t_units")]},
+    "DME": {"name": "DIEMME", "to": ["paolo@diemmeexport.com", "info@diemmeexport.com"],
+            "rule": {2: 6, 4: 3}, "format": "table",       # quarta → domingo, sexta → quinta
+            "columns": [("description", "product"), ("qty_porder", "qty"), ("bunches_case", "bunches"),
+                        ("units_bunch", "ux_bunch"), ("po_price", "price")]},
 }
 CASE_NAMES = {"BX": "BOX", "QB": "QUARTER", "HB": "HALF", "EB": "EIGHTH"}   # como o relatório do desktop mostra
 SENT_FILE = "daily_orders_sent.json"   # no Gist de resultados: {"YYYY-MM-DD": {"HFW": "timestamp", ...}}
@@ -49,6 +61,12 @@ def target_ship_date(today):
     t = today + timedelta(days=4 if today.weekday() == 4 else 2)
     while not is_valid_ship_day(t): t += timedelta(days=1)
     return t
+
+def vendor_ship_date(v, today):
+    """Data de embarque do pedido que esse fornecedor recebe hoje, ou None se hoje não é dia de envio."""
+    if v["rule"] == "plus2": return target_ship_date(today)
+    if today.weekday() not in v["rule"]: return None
+    return today + timedelta(days=(v["rule"][today.weekday()] - today.weekday()) % 7 or 7)
 
 # ── API ──────────────────────────────────────────────────────────────────────
 def api_get(path, tries=4):
@@ -168,6 +186,27 @@ def build_pdf(path, vendor_name, lines, ship, now):
     c.save()
     return tot_boxes, tot_usd
 
+# ── tabela no corpo do email ─────────────────────────────────────────────────
+SIGNATURE = """<p style="margin-top:28px;font-family:Georgia,serif;line-height:1.35">
+<span style="color:#8EA6E8;font-size:15px"><b>Pedro Leão</b></span><br>
+<span style="color:#E8955A;font-size:17px"><b>Full Pot of Flowers</b></span><br>
+<span style="color:#5A7BD8"><b>P 866-954-1538 EXT 338<br>1516 sw 13 ct,Pompano Beach, Florida 33069</b></span><br>
+<a href="http://www.fullpot.com">http://www.fullpot.com</a><br><a href="mailto:pedro@fullpot.com">pedro@fullpot.com</a></p>"""
+
+def build_table_html(lines, columns):
+    td = 'style="border:1px solid #000;padding:2px 4px;font-family:Calibri,Arial,sans-serif;font-size:14px;{}"'
+    head = "".join(f"<td {td.format('')}>{name}</td>" for name, _ in columns)
+    body = ""
+    for l in lines:
+        cells = []
+        for name, key in columns:
+            val = l[key]
+            if isinstance(val, float): val = f"{val:.2f}"
+            num = isinstance(l[key], (int, float))
+            cells.append(f"<td {td.format('text-align:right' if num else '')}>{val}</td>")
+        body += "<tr>" + "".join(cells) + "</tr>"
+    return (f'<table style="border-collapse:collapse"><tr>{head}</tr>{body}</table>' + SIGNATURE)
+
 # ── registro de envios (Gist) ────────────────────────────────────────────────
 def gist_load():
     tok, gid = os.environ.get("GH_TOKEN"), os.environ.get("RESULTS_GIST_ID")
@@ -184,12 +223,15 @@ def gist_save(data):
                    json={"files": {SENT_FILE: {"content": json.dumps(data, indent=1)}}}).raise_for_status()
 
 # ── envio ────────────────────────────────────────────────────────────────────
-def send(to, cc, subject, pdf_path):
+def send(to, cc, subject, pdf_path=None, html=None):
     key = os.environ["RESEND_API_KEY"]
-    with open(pdf_path, "rb") as f: att = base64.b64encode(f.read()).decode()
-    r = requests.post("https://api.resend.com/emails", timeout=60, headers={"Authorization": f"Bearer {key}"}, json={
-        "from": FROM_EMAIL, "to": to, "cc": cc, "subject": subject, "text": " ",
-        "attachments": [{"filename": os.path.basename(pdf_path), "content": att}]})
+    msg = {"from": FROM_EMAIL, "to": to, "cc": cc, "subject": subject}
+    if html: msg["html"] = html
+    else: msg["text"] = " "
+    if pdf_path:
+        with open(pdf_path, "rb") as f: att = base64.b64encode(f.read()).decode()
+        msg["attachments"] = [{"filename": os.path.basename(pdf_path), "content": att}]
+    r = requests.post("https://api.resend.com/emails", timeout=60, headers={"Authorization": f"Bearer {key}"}, json=msg)
     if r.status_code >= 300: raise RuntimeError(f"Resend {r.status_code}: {r.text[:200]}")
     return r.json().get("id")
 
@@ -197,6 +239,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date"); ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--test", action="store_true"); ap.add_argument("--respect-clock", action="store_true")
+    ap.add_argument("--vendor", help="só esse(s) fornecedor(es), ex.: HFW,MOY")
     ap.add_argument("--out", default="out")
     a = ap.parse_args()
 
@@ -204,30 +247,37 @@ def main():
     # O cron roda às 20:20 e 21:20 UTC (cobre EDT e EST); a 2ª execução vira reserva — o registro no Gist evita envio duplo
     if a.respect_clock and not ((now.hour == 16 and now.minute >= 15) or now.hour == 17):
         print(f"Fora do horário em Miami ({now:%H:%M}) — nada a fazer"); return
-    ship = date.fromisoformat(a.date) if a.date else target_ship_date(now.date())
-    if not ship: print("Fim de semana — não envia"); return
-    print(f"Hoje (Miami): {now:%a %Y-%m-%d %H:%M} → embarque {ship:%a %Y-%m-%d}")
+    only = set(a.vendor.upper().split(",")) if a.vendor else set(VENDORS)
+    print(f"Hoje (Miami): {now:%a %Y-%m-%d %H:%M}")
 
     sent = {} if (a.dry_run or a.test) else (gist_load() or {})
-    orders = load_orders(ship)
+    cache = {}
     os.makedirs(a.out, exist_ok=True)
     errors = 0
     for pref, v in VENDORS.items():
-        lines = orders.get(pref)
-        if not lines: print(f"  {pref}: sem POs"); continue
+        if pref not in only: continue
+        ship = date.fromisoformat(a.date) if a.date else vendor_ship_date(v, now.date())
+        if not ship: print(f"  {pref}: hoje não é dia de envio"); continue
+        if ship not in cache: cache[ship] = load_orders(ship)
+        lines = cache[ship].get(pref)
+        if not lines: print(f"  {pref}: sem POs para {ship:%a %Y-%m-%d}"); continue
         if sent.get(ship.isoformat(), {}).get(pref):
             print(f"  {pref}: já enviado em {sent[ship.isoformat()][pref]} — pulando"); continue
-        fname = f"{pref}  for arrival on {ship:%b} {ordinal(ship.day)}.pdf"
-        path = os.path.join(a.out, fname)
-        boxes, usd = build_pdf(path, v["name"], lines, ship, now)
-        npo = len({l['po'] for l in lines})
-        print(f"  {pref}: {npo} POs, {boxes} caixas, ${usd:,.2f} → {path}")
+        npo = len({l['po'] for l in lines}); boxes = sum(l["qty"] for l in lines); usd = sum(l["ext"] for l in lines)
+        if v["format"] == "pdf":
+            subject = f"{pref}  for arrival on {ship:%b} {ordinal(ship.day)}"
+            path, html = os.path.join(a.out, subject + ".pdf"), None
+            build_pdf(path, v["name"], lines, ship, now)
+        else:
+            subject = f"ORDER FOR {ship:%A}".upper()
+            path, html = None, build_table_html(lines, v["columns"])
+            with open(os.path.join(a.out, f"{pref} {subject}.html"), "w") as f: f.write(html)
+        print(f"  {pref}: embarque {ship:%a %Y-%m-%d} — {npo} POs, {boxes} caixas, ${usd:,.2f}")
         if a.dry_run: continue
-        subject = f"{pref}  for arrival on {ship:%b} {ordinal(ship.day)}"
         to, cc = (BUYER_CC, []) if a.test else (v["to"], BUYER_CC)
         if a.test: subject = "TESTE — " + subject + f" (iria para: {', '.join(v['to'])})"
         try:
-            mid = send(to, cc, subject, path); print(f"     enviado ({mid}) para {to} cc {cc}")
+            mid = send(to, cc, subject, path, html); print(f"     enviado ({mid}) para {to} cc {cc}")
         except Exception as e:
             errors += 1; print(f"     ERRO no envio: {e}"); continue
         if not a.test:
