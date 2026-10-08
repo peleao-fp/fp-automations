@@ -17,7 +17,7 @@ Uso:
 
 Variáveis de ambiente: RESEND_API_KEY, GH_TOKEN + RESULTS_GIST_ID (registro de envios).
 """
-import argparse, base64, json, os, re, sys, time
+import argparse, base64, html as html_lib, json, os, re, sys, time
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -42,11 +42,12 @@ VENDORS = {
     "MOY": {"name": "MY ORCHIDS", "to": ["order@myorchids.net", "piyawan@nnorchid.com"],
             "rule": {2: 6, 4: 1}, "format": "table",       # quarta → domingo, sexta → terça
             "columns": [("pccode", "box_mark"), ("description", "product"), ("qty_porder", "qty"),
-                        ("bunches_case", "bunches"), ("units_bunch", "ux_bunch"), ("total_units", "t_units")]},
+                        ("bunches_case", "bunches"), ("units_bunch", "ux_bunch"), ("tunits_x_box", "ux_box"),
+                        ("total_units", "t_units"), ("details", "notes")]},
     "DME": {"name": "DIEMME", "to": ["paolo@diemmeexport.com", "info@diemmeexport.com"],
             "rule": {2: 6, 4: 3}, "format": "table",       # quarta → domingo, sexta → quinta
             "columns": [("description", "product"), ("qty_porder", "qty"), ("bunches_case", "bunches"),
-                        ("units_bunch", "ux_bunch"), ("po_price", "price")]},
+                        ("units_bunch", "ux_bunch"), ("po_price", "price"), ("details", "notes")]},
 }
 CASE_NAMES = {"BX": "BOX", "QB": "QUARTER", "HB": "HALF", "EB": "EIGHTH"}   # como o relatório do desktop mostra
 SENT_FILE = "daily_orders_sent.json"   # no Gist de resultados: {"YYYY-MM-DD": {"HFW": "timestamp", ...}}
@@ -102,7 +103,7 @@ def load_orders(ship):
             "ux_bunch": int(d.get("up_x_pack") or 0), "ux_box": int(d.get("tunits_x_box") or 0),
             "t_units": int(d.get("total_units") or 0), "price": float(d.get("po_price") or 0),
             "ext": float(d.get("ext_price") or 0), "customer": customer_no(p.get("customer")),
-            "box_mark": st("cporder_no", p), "notes": st("details") if st("details") not in ("", ".") else "",
+            "box_mark": st("cporder_no", p), "notes": "\n".join(x.strip() for x in st("details").splitlines() if x.strip() and x.strip() != "."),
             "cargo": st("cargo"),
         })
     for lines in out.values(): lines.sort(key=lambda l: (l["po"], l["product"]))
@@ -187,11 +188,14 @@ def build_pdf(path, vendor_name, lines, ship, now):
     return tot_boxes, tot_usd
 
 # ── tabela no corpo do email ─────────────────────────────────────────────────
-SIGNATURE = """<p style="margin-top:28px;font-family:Georgia,serif;line-height:1.35">
+LOGO = next((os.path.join(os.path.dirname(__file__), f) for f in ("logo.png", "logo.jpg", "logo.jpeg")
+             if os.path.exists(os.path.join(os.path.dirname(__file__), f))), None)
+SIGNATURE = (('<img src="cid:fplogo" width="215" style="float:left;margin:24px 24px 0 0" alt="Full Pot of Flowers">' if LOGO else "") +
+"""<p style="margin-top:28px;font-family:Georgia,serif;line-height:1.35">
 <span style="color:#8EA6E8;font-size:15px"><b>Pedro Leão</b></span><br>
 <span style="color:#E8955A;font-size:17px"><b>Full Pot of Flowers</b></span><br>
 <span style="color:#5A7BD8"><b>P 866-954-1538 EXT 338<br>1516 sw 13 ct,Pompano Beach, Florida 33069</b></span><br>
-<a href="http://www.fullpot.com">http://www.fullpot.com</a><br><a href="mailto:pedro@fullpot.com">pedro@fullpot.com</a></p>"""
+<a href="http://www.fullpot.com">http://www.fullpot.com</a><br><a href="mailto:pedro@fullpot.com">pedro@fullpot.com</a></p>""")
 
 def build_table_html(lines, columns):
     td = 'style="border:1px solid #000;padding:2px 4px;font-family:Calibri,Arial,sans-serif;font-size:14px;{}"'
@@ -201,9 +205,9 @@ def build_table_html(lines, columns):
         cells = []
         for name, key in columns:
             val = l[key]
-            if isinstance(val, float): val = f"{val:.2f}"
-            num = isinstance(l[key], (int, float))
-            cells.append(f"<td {td.format('text-align:right' if num else '')}>{val}</td>")
+            num = isinstance(val, (int, float))
+            val = f"{val:.2f}" if isinstance(val, float) else html_lib.escape(str(val)).replace("\n", "<br>")
+            cells.append(f"<td {td.format('text-align:right;vertical-align:bottom' if num else 'vertical-align:bottom')}>{val}</td>")
         body += "<tr>" + "".join(cells) + "</tr>"
     return (f'<table style="border-collapse:collapse"><tr>{head}</tr>{body}</table>' + SIGNATURE)
 
@@ -228,9 +232,12 @@ def send(to, cc, subject, pdf_path=None, html=None):
     msg = {"from": FROM_EMAIL, "to": to, "cc": cc, "subject": subject}
     if html: msg["html"] = html
     else: msg["text"] = " "
+    atts = []
     if pdf_path:
-        with open(pdf_path, "rb") as f: att = base64.b64encode(f.read()).decode()
-        msg["attachments"] = [{"filename": os.path.basename(pdf_path), "content": att}]
+        with open(pdf_path, "rb") as f: atts.append({"filename": os.path.basename(pdf_path), "content": base64.b64encode(f.read()).decode()})
+    if html and LOGO:
+        with open(LOGO, "rb") as f: atts.append({"filename": os.path.basename(LOGO), "content": base64.b64encode(f.read()).decode(), "content_id": "fplogo"})
+    if atts: msg["attachments"] = atts
     r = requests.post("https://api.resend.com/emails", timeout=60, headers={"Authorization": f"Bearer {key}"}, json=msg)
     if r.status_code >= 300: raise RuntimeError(f"Resend {r.status_code}: {r.text[:200]}")
     return r.json().get("id")
