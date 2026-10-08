@@ -46,8 +46,7 @@ VENDORS = {
                         ("total_units", "t_units"), ("details", "notes")]},
     "DME": {"name": "DIEMME", "to": ["paolo@diemmeexport.com", "info@diemmeexport.com"],
             "rule": {2: 6, 4: 3}, "format": "table",       # quarta → domingo, sexta → quinta
-            "columns": [("description", "product"), ("qty_porder", "qty"), ("bunches_case", "bunches"),
-                        ("units_bunch", "ux_bunch"), ("po_price", "price"), ("details", "notes")]},
+            "columns": "MOY"},                              # mesmas colunas da My Orchids
 }
 CASE_NAMES = {"BX": "BOX", "QB": "QUARTER", "HB": "HALF", "EB": "EIGHTH"}   # como o relatório do desktop mostra
 SENT_FILE = "daily_orders_sent.json"   # no Gist de resultados: {"YYYY-MM-DD": {"HFW": "timestamp", ...}}
@@ -277,8 +276,12 @@ def main():
             build_pdf(path, v["name"], lines, ship, now)
         else:
             subject = f"ORDER FOR {ship:%A}".upper()
-            path, html = None, build_table_html(lines, v["columns"])
-            with open(os.path.join(a.out, f"{pref} {subject}.html"), "w") as f: f.write(html)
+            cols = v["columns"] if isinstance(v["columns"], list) else VENDORS[v["columns"]]["columns"]
+            path, html = None, build_table_html(lines, cols)
+            preview = html
+            if LOGO:   # na prévia local o logo vai embutido (no email ele segue como anexo inline cid:fplogo)
+                with open(LOGO, "rb") as f: preview = html.replace("cid:fplogo", "data:image/png;base64," + base64.b64encode(f.read()).decode())
+            with open(os.path.join(a.out, f"{pref} {subject}.html"), "w") as f: f.write(preview)
         print(f"  {pref}: embarque {ship:%a %Y-%m-%d} — {npo} POs, {boxes} caixas, ${usd:,.2f}")
         if a.dry_run: continue
         to, cc = (BUYER_CC, []) if a.test else (v["to"], BUYER_CC)
