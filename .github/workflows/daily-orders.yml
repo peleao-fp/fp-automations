@@ -30,8 +30,9 @@ jobs:
           RESEND_API_KEY:  ${{ secrets.RESEND_API_KEY }}
           GH_TOKEN:        ${{ secrets.GH_TOKEN }}
           RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
-          # Agendado: usa a variável do repositório DAILY_ORDERS_MODE (padrão "test" até o Pedro liberar)
-          MODE: ${{ github.event_name == 'schedule' && (vars.DAILY_ORDERS_MODE || 'test') || inputs.mode }}
+          # Agendado: envia de verdade (liberado pelo Pedro em 2026-10-07). Para pausar, crie a variável
+          # do repositório DAILY_ORDERS_MODE = test (só o Pedro recebe) ou dry-run (não envia nada).
+          MODE: ${{ github.event_name == 'schedule' && (vars.DAILY_ORDERS_MODE || 'real') || inputs.mode }}
           DATE: ${{ inputs.date }}
         run: |
           ARGS=""
