@@ -1,0 +1,46 @@
+name: Pedidos das fazendas da Califórnia (quinta → sexta)
+
+on:
+  schedule:
+    - cron: '20 20 * * 4'   # quinta 4:20 PM Miami no horário de verão (EDT)
+    - cron: '20 21 * * 4'   # quinta 4:20 PM Miami no horário padrão (EST)
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Data dos pedidos (YYYY-MM-DD) — vazio = próxima sexta'
+        required: false
+      mode:
+        description: 'dry-run (só gera Excel) | test (envia só para o Pedro) | real'
+        required: true
+        default: 'test'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests holidays reportlab openpyxl
+      - name: Gerar e enviar
+        env:
+          RESEND_API_KEY:   ${{ secrets.RESEND_API_KEY }}
+          FULLPOTOS_COOKIE: ${{ secrets.FULLPOTOS_COOKIE }}
+          # Agendado: começa em teste (só o Pedro recebe) até a variável FARM_ORDERS_MODE = real
+          MODE: ${{ github.event_name == 'schedule' && (vars.FARM_ORDERS_MODE || 'test') || inputs.mode }}
+          DATE: ${{ inputs.date }}
+        run: |
+          H=$(TZ=America/New_York date +%H)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$H" != "16" ]; then echo "Fora das 4 PM em Miami ($H h) — nada a fazer"; exit 0; fi
+          ARGS=""
+          [ -n "$DATE" ] && ARGS="$ARGS --date $DATE"
+          case "$MODE" in dry-run) ARGS="$ARGS --dry-run" ;; test) ARGS="$ARGS --test" ;; real) ;; *) echo "MODE inválido"; exit 1 ;; esac
+          python orders/farm_orders.py $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fazendas-${{ github.run_id }}
+          path: out/
+          retention-days: 30
