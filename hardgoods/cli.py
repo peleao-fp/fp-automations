@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""
+Ferramentas dos hardgoods — o que hoje se faz à mão, em comandos com simulação. Nada grava sem --apply.
+
+  python -m hardgoods.cli pb 68D5F78C                         # mostra o PB (cabeçalho e linhas)
+  python -m hardgoods.cli remove 68D5F78C 3203-24-60 4111-06-09 [--apply]
+  python -m hardgoods.cli buy 68D5F78C 22BF77D9 --grower SSA --ship 2026-10-12 --so 68D5F78C=SO-454843 [--costs custos.json] [--apply]
+  python -m hardgoods.cli order 68D5F78C 22BF77D9 --supplier Syndicate --out ~/Downloads
+  python -m hardgoods.cli merge 68D5F78C 29301624 [--apply]     # junta o PB 29301624 dentro do 68D5F78C (fica o 1º)
+  python -m hardgoods.cli packing --grower SSA --ship 2026-10-12 [--available 2026-10-16] [--apply]
+
+PB é sempre o código interno (pbook_uq); a automação o guarda ao criar o PB.
+"""
+import argparse, json, math, os, re, sys
+from datetime import date, timedelta
+
+from . import flexy, fullpotos as FP, purchase as P
+
+CODE = re.compile(r"\b(?:\d{2,5}-\d{2,3}-\d{2,4}|C\d{3,4}(?:-\d{2})?|[A-Z]{1,4}\d{2,5}[A-Z]{0,3})\b")
+GROWERS = {"SSA": "1B5CCCF3", "SFP": "6E2B3D86", "WDI": "08A2D2A6", "GWS": None}   # prefixo do PO → grower_uq
+STORE = {"FT LAUDERDALE": "PMP", "WEST PALM BEACH": "WPB", "NAPLES": "NPL", "MIAMI": "MIA"}
+SKIP = ("DELIVERY CHARGE",)
+
+def codes(desc): return CODE.findall((desc or "").upper())
+def has_code(desc, c): return re.search(r"(^|[\s(/])" + re.escape(c.upper()) + r"($|[\s)])", (desc or "").upper().strip()) is not None
+
+def pb_info(uq):
+    h = flexy.read_header(uq)
+    if not h: sys.exit(f"PB {uq} não encontrado")
+    wh_name = (h.get("warehouse") or "").split(" - ")[0].strip().upper()
+    m = re.search(r"-\s*(\d+)\s*$", (h.get("customer") or "").strip())
+    return {"uq": uq, "no": h["pbook_no"], "status": h.get("status"), "customer": (h.get("customer") or "").strip(),
+            "fp": f"FP#{m.group(1)}" if m else "", "store": STORE.get(wh_name, wh_name), "wh": P.WH_BY_NAME.get(wh_name),
+            "date": h.get("shipping_date")}
+
+def cmd_pb(a):
+    for uq in a.pb:
+        i = pb_info(uq); L = flexy.read_lines(uq)
+        print(f"PB {i['no']} ({uq}) · {i['store']} · {i['customer']} · {i['status']} · {i['date']} · {len(L)} linhas, {sum(l['qty_order'] for l in L)} cx")
+        for l in sorted(L, key=lambda l: l["description"]):
+            print(f"   {l['description'].strip()[:48]:<48} {l['qty_order']:>3} cx × {l['packs_x_case']} × {l['up_x_pack']}"
+                  f"  venda {l['so_price']:>8}  já em PO: {l['qty_porder']}")
+
+def cmd_remove(a):
+    L = flexy.read_lines(a.pb[0])
+    for c in a.codes:
+        m = [l for l in L if has_code(l["description"], c)]
+        if len(m) != 1: print(f"  {c}: {len(m)} linhas — não mexo"); continue
+        if m[0]["qty_porder"]: print(f"  {c}: já tem PO ({m[0]['qty_porder']} cx) — não mexo"); continue
+        print(f"  {'remove' if a.apply else '(simulação) removeria'} {m[0]['description'].strip()[:50]} ({m[0]['qty_order']} cx)")
+        if a.apply: flexy.delete_line(m[0]["unico"])
+    if a.apply:
+        L = flexy.read_lines(a.pb[0]); print(f"  PB agora: {len(L)} linhas, {sum(l['qty_order'] for l in L)} cx")
+
+def last_costs(prefix, days=75):
+    """Custo por unidade da última compra de cada código desse fornecedor."""
+    hist = {}
+    for i in range(days):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        try: rows = P.pos_by_date(d)
+        except Exception: continue
+        for p in rows:
+            if not (p.get("grower_po") or "").startswith(prefix): continue
+            for c in codes(p.get("description")):
+                if c not in hist or d > hist[c][0]: hist[c] = (d, p["unico"])
+    out = {}
+    for c, (d, unico) in hist.items():          # preço do PO é por pack → divide pelas unidades do pack
+        po = P.po_detail(unico)
+        if po: out[c] = (d, float(po.get("po_price") or 0) / max(1, int(po.get("up_x_pack") or 1)))
+    return out
+
+def cost_for(l, hist, manual):
+    if l["unico"] in manual: return float(manual[l["unico"]]), "informado"
+    upc = int(l["packs_x_case"]) * int(l["up_x_pack"]); sale = float(l["so_price"]) / max(1, int(l["up_x_pack"]))
+    h = next((hist[c] for c in codes(l["description"]) if c in hist), None)
+    if h: return h[1], f"última compra {h[0]}"
+    if sale < 0.05: return None, "SEM PREÇO"
+    if sale >= 10 and upc >= 12: return math.floor(sale / upc * 0.62 * 100) / 100, f"venda era da caixa ({sale:.2f}÷{upc})"
+    return math.floor(sale * 0.62 * 100) / 100, "venda × 0,62"
+
+def cmd_buy(a):
+    grower = GROWERS.get(a.grower.upper())
+    if not grower: sys.exit(f"Fornecedor {a.grower} sem grower_uq configurado")
+    manual = json.load(open(a.costs)) if a.costs else {}
+    so = dict(x.split("=", 1) for x in (a.so or []))
+    print("Buscando custo das últimas compras…"); hist = last_costs(a.grower.upper())
+    plan, total = [], 0.0
+    for uq in a.pb:
+        i = pb_info(uq)
+        if not i["wh"]: sys.exit(f"PB {i['no']}: warehouse desconhecido")
+        for l in flexy.read_lines(uq):
+            if any(s in l["description"].upper() for s in SKIP): continue
+            falta = int(l["qty_order"]) - int(l["qty_porder"] or 0)
+            if falta <= 0: continue
+            cost, how = cost_for(l, hist, manual)
+            upc = int(l["packs_x_case"]) * int(l["up_x_pack"]); ext = round((cost or 0) * upc * falta, 2); total += ext
+            plan.append((i, l, falta, cost, how))
+            print(f"{'!!' if cost is None else '  '} {i['store']:<4} {i['no']} {l['description'].strip()[:40]:<40} {falta:>2} cx × {upc:>3} | "
+                  f"custo/un {('%.4f' % cost) if cost is not None else '   —  '} | {how}")
+    print(f"\n{len(plan)} linhas a comprar · total estimado ${total:,.2f}")
+    if not a.apply: return print("(simulação — nada gravado)")
+    if any(p[3] is None for p in plan): sys.exit("NÃO GRAVADO: há linhas sem custo (use --costs)")
+    for i, l, falta, cost, how in plan:
+        note = f"{so.get(i['uq'], '')} - " + ("custo da ultima compra" if how.startswith("última") else "custo estimado - confirmar na invoice")
+        try:
+            po = P.create_from_pb_line(l, i["uq"], grower, i["wh"], a.ship, cost, qty=falta, details=note.strip(" -"))
+            print(f"  OK   {po['description'].strip()[:40]:<40} {po['qty_porder']} cx = ${po['ext_price']}")
+        except Exception as e:
+            print(f"  ERRO {l['description'].strip()[:40]:<40} {e}")
+
+def cmd_order(a):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    os.makedirs(os.path.expanduser(a.out), exist_ok=True)
+    for uq in a.pb:
+        i = pb_info(uq); wb = Workbook(); ws = wb.active; ws.title = "Order"
+        ws["A1"] = f"FULL POT · {a.supplier.upper()} ORDER"; ws["A1"].font = Font(bold=True, size=14)
+        ws["A2"] = f"STORE: {i['store']} · {i['customer']}"; ws["A2"].font = Font(bold=True, color="C00000")
+        ws["A3"] = "Delivery: 1516 SW 13 CT, Pompano Beach, FL 33069"
+        ws.append([]); ws.append(["Box Mark", "PB", "Item", "Description", "Boxes", "Units/Box", "Total Units"])
+        for l in sorted(flexy.read_lines(uq), key=lambda l: l["description"]):
+            if any(s in l["description"].upper() for s in SKIP): continue
+            c = codes(l["description"]); upc = int(l["packs_x_case"]) * int(l["up_x_pack"])
+            ws.append([i["fp"], i["no"], c[0] if c else "", l["description"].strip(), l["qty_order"], upc, l["qty_order"] * upc])
+        path = os.path.join(os.path.expanduser(a.out), f"{a.supplier} - {i['store']} - PB {i['no']}.xlsx"); wb.save(path); print("  ", path)
+
+
+def cmd_merge(a):
+    """Junta os PBs de origem dentro do PB de destino. Item igual (produto, formato e preço) soma; o resto entra como linha nova."""
+    target, sources = a.pb[0], a.pb[1:]
+    T = flexy.read_lines(target); S = {u: flexy.read_lines(u) for u in sources}
+    for u, L in S.items():
+        if any(int(l["qty_porder"] or 0) for l in L): sys.exit(f"PB {u} já tem linha com PO — não junto")
+    os.makedirs("out", exist_ok=True)
+    with open(f"out/backup_merge_{target}.json", "w") as f: json.dump({"target": T, "sources": S}, f)
+    same = lambda x, l: (x["product_uq"] == l["product_uq"] and x["packs_x_case"] == l["packs_x_case"]
+                         and x["up_x_pack"] == l["up_x_pack"] and abs(float(x["so_price"]) - float(l["so_price"])) < 0.001)
+    plan = []   # (linha a inserir, qty, linha antiga do destino a apagar ou None)
+    for u, L in S.items():
+        for l in L:
+            t = [x for x in T if same(x, l) and not int(x["qty_porder"] or 0)]
+            plan.append((l, int(l["qty_order"]) + (int(t[0]["qty_order"]) if t else 0), t[0] if t else None))
+    for l, q, old in plan:
+        print(f"  {'SOMA ' if old else 'ENTRA'} {l['description'].strip()[:44]:<44} {q} cx × {l['packs_x_case']} × {l['up_x_pack']} @ {l['so_price']}")
+    exp = sum(int(l["qty_order"]) for l in T) + sum(int(l["qty_order"]) for L in S.values() for l in L)
+    print(f"  destino ficará com {exp} cx")
+    if not a.apply: return print("(simulação — nada gravado)")
+    for l, q, old in plan:   # insere tudo primeiro (pula o que já entrou, se for uma retomada)
+        cur = flexy.read_lines(target)
+        if any(same(x, l) and int(x["qty_order"]) == q and (not old or x["unico"] != old["unico"]) for x in cur): continue
+        flexy.insert_line(target, l["product_uq"], l["case_uq"], q, int(l["packs_x_case"]), int(l["up_x_pack"]), float(l["so_price"]))
+    for l, q, old in plan:
+        if old: flexy.delete_line(old["unico"])
+    got = sum(int(l["qty_order"]) for l in flexy.read_lines(target))
+    if got != exp: sys.exit(f"CONFERÊNCIA FALHOU: destino tem {got} cx, esperado {exp} — origens NÃO apagadas")
+    for u, L in S.items():
+        for l in L: flexy.delete_line(l["unico"])
+        flexy.delete_prebook(u)
+    print(f"  OK: destino com {got} cx; origens esvaziadas")
+
+def cmd_packing(a):
+    """Fecha o packing antes da mercadoria: um por loja, invoice XINVOICE, available date, Add from PO. Fica ABERTO."""
+    grower = GROWERS.get(a.grower.upper())
+    today = date.today(); avail = date.fromisoformat(a.available) if a.available else today + timedelta(days=7)
+    awb = "989" + avail.strftime("%Y%m%d")
+    pos = [p for p in P.pos_by_date(a.ship) if (p.get("grower_po") or "").split("-")[0] == a.grower.upper() and p.get("active", True)]
+    stores = {}
+    for p in pos:
+        falta = int(p.get("qty_porder") or 0) - int(p.get("qty_ship") or 0)   # o PO registra o que já foi para packing
+        if falta <= 0: print(f"  já no Inventory Entry: {p['grower_po']} {p['description'].strip()[:40]}"); continue
+        p["_falta"] = falta
+        wh = P.WH_BY_NAME.get((p.get("warehouse") or "").strip().upper())
+        if not wh: sys.exit(f"Warehouse desconhecido no PO {p['grower_po']}")
+        stores.setdefault(wh, []).append(p)
+    existing = {}   # packing já criado hoje neste AWB para esse fornecedor/warehouse (retomada)
+    for pk in FP.req("GET", f"/api/inventory-entry/packing-x-awb?awb={awb}&date={today.isoformat()}") or []:
+        if pk.get("grower_uq") == grower:
+            h = FP.packing(pk["pack_uq"]); existing[(h or {}).get("wphysical_uq")] = pk["pack_uq"]
+    print(f"{a.grower} · POs de {a.ship} · AWB {awb} · available {avail} · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}")
+    for wh, L in stores.items():
+        sos = sorted({m.group(0) for p in L for m in [re.search(r"SO-\d+", P.po_detail(p["unico"]).get("details") or "")] if m})
+        store = next((k for k, v in P.WH_BY_NAME.items() if v == wh), wh)
+        print(f"\n  {store}: {len(L)} POs, {sum(p['_falta'] for p in L)} cx {'(' + ', '.join(sos) + ')' if sos else ''}"
+              f"{' — reaproveita packing ' + existing[wh] if wh in existing else ''}")
+        if not a.apply: continue
+        pack = existing.get(wh) or FP.create_packing(grower, wh, awb, today.strftime("%Y%m%d"), "XINVOICE", today.isoformat(), avail.isoformat(),
+                                                     ("XINVOICE - AGUARDANDO INVOICE " + " ".join(sos)).strip()[:254])
+        for p in L:
+            try: FP.add_from_po(pack, p["unico"], p["_falta"]); print(f"    + {p['description'].strip()[:44]} ({p['_falta']} cx)")
+            except Exception as e: print(f"    ERRO {p['description'].strip()[:44]}: {e}")
+    if a.apply: print("\nPackings ficam ABERTOS e sem Send to WH — confira na tela do Inventory Entry.")
+    else: print("\n(simulação — nada gravado)")
+
+def _so_units(c):   # venda por unidade: custo ÷ 0,62 subindo para o ,99
+    raw = c / 0.62; base = math.floor(raw); return round(base + 0.99 if raw <= base + 0.99 else base + 1.99, 2)
+def _so_box(c):     # venda para cliente de caixa: custo ÷ 0,62, centavo para cima
+    return math.ceil(round(c / 0.62 * 100, 6)) / 100
+
+def cmd_invoice(a):
+    """Aplica uma conferência de invoice (plano JSON gerado pela leitura da fatura).
+    status ok/qty: corrige o custo do PO (e da caixa com --box-cost) · restore: volta PO e caixa de item tirado por engano.
+    A venda é recalculada pelo custo: abaixo de 38% ou acima de 75% (venda de caixa no lugar da unidade) vai para a regra;
+    cliente (não-loja) vai para custo ÷ 0,62. A caixa é editada pela tela de packing do Flexymax, que mantém o customer."""
+    plan = json.load(open(a.plan)); only = set(a.only or []); packs = dict(x.split("=", 1) for x in (a.packs or []))
+    if a.check_totals:
+        for so, (lido, sub) in json.load(open(a.check_totals)).items():
+            if abs(lido - sub) > 0.01: sys.exit(f"PARADO: {so} linhas lidas ${lido} ≠ subtotal da fatura ${sub}")
+    todo = [it for it in plan if it["status"] != "missing" and (not only or it.get("box_unico") in only)]
+    print(f"{len(todo)} linhas · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}"); lost = []
+    for it in todo:
+        p = it["po"]; unit = float(it.get("unit_f_new") or it["unit_f"]); upx = int(p["up_x_pack"]); cost_ie = round(unit * upx, 4)
+        so = next(s_ for s_ in packs if s_ in (p.get("details") or "")) if packs else None
+        note = f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - {it['invoice']} conferida"[:250]
+        if it["status"] == "restore":
+            print(f"  RESTAURA {p['description'].strip()[:36]:<36} PO {it['inv_qty']} cx @ {unit:.4f}/un → packing {packs.get(so)}")
+            if not a.apply: continue
+            P.update(p["unico"], unit_price=unit, qty=it["inv_qty"], confirm=True, details=note)
+            before = {b["unico"] for b in FP.packing_details(packs[so])}
+            FP.add_from_po(packs[so], p["unico"], it["inv_qty"])
+            new = [b for b in FP.packing_details(packs[so]) if b["unico"] not in before]
+            if len(new) != 1: sys.exit(f"PARADO: esperava 1 caixa nova, achei {len(new)}")
+            it["box_unico"] = new[0]["unico"]
+        elif a.apply:
+            P.update(p["unico"], unit_price=unit, confirm=True, details=note)
+        if not a.box_cost or not it.get("box_unico") or not a.apply:
+            if not a.apply: print(f"  {p['description'].strip()[:40]:<40} custo/un {unit:.4f}")
+            continue
+        b0 = FP.box(it["box_unico"]); sale = float(b0.get("price_x_u") or 0); m = (1 - cost_ie / sale) * 100 if sale > 0 else -1
+        ctype = it.get("ctype", "unit")
+        new_sale = _so_box(cost_ie) if ctype == "cliente" else (None if 38 <= m <= 75 else (_so_box(cost_ie) if ctype == "box" else _so_units(cost_ie)))
+        mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
+        b, after = FP.edit_box(it["box_unico"], cost=cost_ie, price=new_sale, fill_box_id=mark)   # mantém o customer
+        print(f"  {p['description'].strip()[:40]:<40} custo {b.get('f_cost_x_u')} → {after.get('f_cost_x_u')} · venda {b.get('price_x_u')} → {after.get('price_x_u')}")
+        if int(after.get("customer") or 0) == 0:
+            lost.append((after.get("lote"), p["description"].strip(), (after.get("box_id") or "").strip()))
+    if lost:
+        json.dump(lost, open(os.path.splitext(a.plan)[0] + "_customers.json", "w")); print(f"\n{len(lost)} caixas com customer a recolocar")
+    if a.apply and a.headers and not only:
+        for pk, inv in (x.split("=", 1) for x in a.headers):
+            h = FP.packing(pk); det = re.sub(r"XINVOICE - AGUARDANDO INVOICE", "INVOICE " + inv, (h.get("details") or "").strip())
+            h2 = FP.update_packing_header(pk, invoice_no=inv, details=det)
+            print(f"  packing {pk}: invoice {(h2.get('invoice_no') or '').strip()} · {(h2.get('details') or '').strip()}")
+
+def cmd_adjust(a):
+    """Ajustes pontuais depois da invoice. Simula sem --apply.
+    po-units PO UNID   · unidades por caixa do PO (preço por unidade mantido)
+    box-units CAIXA UNID · unidades da caixa no Inventory Entry (rota lot info; confere customer)
+    add-box PACKING PRODUTO QTD UNID VENDA · caixa de estoque sem PO (custo 0), ex.: amostra"""
+    op, args = a.op, a.args
+    if op == "po-units":
+        unico, units = args[0], int(args[1]); d = P.po_detail(unico)
+        unit_price = float(d["po_price"]) / max(1, int(d["up_x_pack"]))
+        print(f"PO {unico} {d['description'].strip()[:40]}: {d['qty_porder']} cx × {d['bunches_case']} → × {units} un @ {unit_price}")
+        if not a.apply: return print("(simulação)")
+        x = P._req("PUT", f"/api/purchase-orders/{unico}", {**_po_payload(d), "bunches_case": units})
+        if not x or x.get("error") is not False: sys.exit(f"falhou: {x}")
+        d = P.po_detail(unico); print(f"  ok: {d['qty_porder']} cx × {d['bunches_case']} = {d['total_units']} un · ${d['ext_price']}")
+    elif op == "box-units":
+        unico, units = args[0], int(args[1]); b = FP.box(unico)
+        print(f"caixa {unico} lote {b['lote']} {b['description'].strip()[:36]}: {b['packs_box']} → {units} un · customer {b['customer']}")
+        if not a.apply: return print("(simulação)")
+        b0, b1 = FP.edit_box(unico, packs_box=units)   # tela de packing do Flexymax: mantém o customer
+        print(f"  ok: {b1['packs_box']} un · total {b1['total_units']} · customer {b0['customer']} → {b1['customer']} · BOXID {(b1.get('box_id') or '').strip()}")
+        if b1.get("customer") != b0.get("customer"): print("  ATENÇÃO: customer mudou — recolocar")
+    elif op == "add-box":
+        pack, search, qty, units, price = args[0], args[1], int(args[2]), int(args[3]), float(args[4])
+        prods = [x for x in FP.find_product(search) if search.upper() in (x.get("description") or "").upper()]
+        for x in prods[:5]: print(f"  produto: {x.get('unico')} · {(x.get('description') or '').strip()[:50]} · caixa {x.get('case_uq')}")
+        if len(prods) != 1: sys.exit(f"esperava 1 produto para '{search}', achei {len(prods)}")
+        pr = prods[0]; case = pr.get("case_uq") or P.CASE_UQ["BX"]
+        print(f"Add Box no packing {pack}: {qty} cx × {units} un · custo 0 · venda {price}")
+        if not a.apply: return print("(simulação)")
+        r = FP.add_box(pack, pr["unico"], case, qty, units, 1, price); print("  ok:", r)
+
+def _po_payload(d):
+    case_sh = (d.get("case_sh") or "").strip(); wh = P.WH_BY_NAME.get((d.get("wp_name") or "").strip().upper())
+    return {"grower_uq": d["grower_uq"], "product_uq": d["product_uq"], "case_uq": P.CASE_UQ[case_sh], "qty_porder": int(d["qty_porder"]),
+            "qty_confirm": int(d["qty_confirm"]), "bunches_case": int(d["bunches_case"]), "up_x_pack": int(d["up_x_pack"]),
+            "po_price": float(d["po_price"]), "charges": 0, "broker": 0, "handling": 0, "freight": 0, "duties": 0,
+            "ship_date": (d.get("ship_date") or "")[:10], "food": False, "pccode": (d.get("description") or "")[:20].strip(),
+            "details": (d.get("details") or "").strip() or ".", "salesman": P.SALESMAN, "wphysical_uq": wh, "buyer_uq": P.BUYER_UQ,
+            "farm_item": ".", "purchase_type": "S"}
+
+def main():
+    ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("pb"); s.add_argument("pb", nargs="+"); s.set_defaults(f=cmd_pb)
+    s = sub.add_parser("remove"); s.add_argument("pb", nargs=1); s.add_argument("codes", nargs="+"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_remove)
+    s = sub.add_parser("buy"); s.add_argument("pb", nargs="+"); s.add_argument("--grower", required=True); s.add_argument("--ship", required=True)
+    s.add_argument("--so", nargs="*"); s.add_argument("--costs"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_buy)
+    s = sub.add_parser("order"); s.add_argument("pb", nargs="+"); s.add_argument("--supplier", required=True); s.add_argument("--out", default="out"); s.set_defaults(f=cmd_order)
+    s = sub.add_parser("merge"); s.add_argument("pb", nargs="+"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_merge)
+    s = sub.add_parser("packing"); s.add_argument("--grower", required=True); s.add_argument("--ship", required=True)
+    s.add_argument("--available"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_packing)
+    s = sub.add_parser("invoice"); s.add_argument("--plan", required=True); s.add_argument("--only", nargs="*")
+    s.add_argument("--headers", nargs="*", help="pack_uq=SI-123 ..."); s.add_argument("--box-cost", action="store_true")
+    s.add_argument("--packs", nargs="*", help="SO-123=pack_uq …"); s.add_argument("--check-totals")
+    s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_invoice)
+    s = sub.add_parser("adjust"); s.add_argument("op", choices=["po-units", "box-units", "add-box"]); s.add_argument("args", nargs="+")
+    s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_adjust)
+    a = ap.parse_args(); a.f(a)
+
+if __name__ == "__main__":
+    main()
