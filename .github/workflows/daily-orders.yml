@@ -2,8 +2,9 @@ name: Pedidos diários (Holex / EZ / Anton)
 
 on:
   schedule:
-    - cron: '20 20 * * 1-5'   # 4:20 PM Miami no horário de verão (EDT)
-    - cron: '20 21 * * 1-5'   # 4:20 PM Miami no horário padrão (EST) / reserva no verão
+    # O GitHub atrasa o cron: tenta a cada 15 min das 16:20 às ~19:50 Miami; o 1º após 16:20 envia, o Gist evita repetir
+    - cron: '20,35,50,5 20-23 * * 1-5'
+    - cron: '5,20,35,50 0 * * 2-6'
   workflow_dispatch:
     inputs:
       date:
@@ -12,6 +13,8 @@ on:
       mode:
         description: 'dry-run (só gera PDF) | test (envia só para o Pedro) | real'
         required: true
+        type: choice
+        options: [test, dry-run, real]
         default: 'test'
 
 jobs:

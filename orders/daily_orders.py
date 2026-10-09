@@ -13,7 +13,7 @@ Uso:
   python orders/daily_orders.py --vendor MOY,DME  # só esses fornecedores
   python orders/daily_orders.py --dry-run         # só gera os PDFs em ./out, não envia
   python orders/daily_orders.py --test            # envia só para o comprador, assunto "TESTE"
-  python orders/daily_orders.py --respect-clock   # só roda entre 16:15 e 17:59 em Miami (cron)
+  python orders/daily_orders.py --respect-clock   # cron: só envia a partir das 16:20 em Miami (uma vez por dia)
 
 Variáveis de ambiente: RESEND_API_KEY, GH_TOKEN + RESULTS_GIST_ID (registro de envios).
 """
@@ -250,13 +250,14 @@ def main():
     a = ap.parse_args()
 
     now = datetime.now(MIAMI)
-    # O cron roda às 20:20 e 21:20 UTC (cobre EDT e EST); a 2ª execução vira reserva — o registro no Gist evita envio duplo
-    if a.respect_clock and not ((now.hour == 16 and now.minute >= 15) or now.hour == 17):
+    # O GitHub atrasa o cron (já atrasou 4 h): ele tenta a cada 15 min e o 1º disparo após 16:20 envia; o Gist evita envio duplo
+    if a.respect_clock and now.hour * 60 + now.minute < 16 * 60 + 20:
         print(f"Fora do horário em Miami ({now:%H:%M}) — nada a fazer"); return
     only = set(a.vendor.upper().split(",")) if a.vendor else set(VENDORS)
     print(f"Hoje (Miami): {now:%a %Y-%m-%d %H:%M}")
 
-    sent = {} if (a.dry_run or a.test) else (gist_load() or {})
+    sent = {} if a.dry_run else (gist_load() or {})
+    tag = ":test" if a.test else ""                     # testes ficam registrados à parte
     cache = {}
     os.makedirs(a.out, exist_ok=True)
     errors = 0
@@ -267,8 +268,8 @@ def main():
         if ship not in cache: cache[ship] = load_orders(ship)
         lines = cache[ship].get(pref)
         if not lines: print(f"  {pref}: sem POs para {ship:%a %Y-%m-%d}"); continue
-        if sent.get(ship.isoformat(), {}).get(pref):
-            print(f"  {pref}: já enviado em {sent[ship.isoformat()][pref]} — pulando"); continue
+        if sent.get(ship.isoformat() + tag, {}).get(pref):
+            print(f"  {pref}: já enviado em {sent[ship.isoformat() + tag][pref]} — pulando"); continue
         npo = len({l['po'] for l in lines}); boxes = sum(l["qty"] for l in lines); usd = sum(l["ext"] for l in lines)
         if v["format"] == "pdf":
             subject = f"{pref}  for arrival on {ship:%b} {ordinal(ship.day)}"
@@ -290,8 +291,8 @@ def main():
             mid = send(to, cc, subject, path, html); print(f"     enviado ({mid}) para {to} cc {cc}")
         except Exception as e:
             errors += 1; print(f"     ERRO no envio: {e}"); continue
-        if not a.test:
-            sent.setdefault(ship.isoformat(), {})[pref] = now.isoformat(timespec="minutes")
+        if True:
+            sent.setdefault(ship.isoformat() + tag, {})[pref] = now.isoformat(timespec="minutes")
             try: gist_save(sent)
             except Exception as e:
                 errors += 1; print(f"     ATENÇÃO: enviado, mas não consegui registrar no Gist ({e}) — a execução reserva pode reenviar")

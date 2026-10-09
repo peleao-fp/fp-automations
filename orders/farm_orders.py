@@ -22,7 +22,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daily_orders import FROM_EMAIL, BUYER_CC, MIAMI, api_get, customer_no, ordinal
+from daily_orders import FROM_EMAIL, BUYER_CC, MIAMI, api_get, customer_no, ordinal, gist_load, gist_save
 
 FP_BASE = "https://fullpotos.flexymax.com"
 TO = ["valerii@fullpot.com"]
@@ -114,11 +114,16 @@ def next_friday(today):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date"); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--test", action="store_true")
-    ap.add_argument("--out", default="out")
+    ap.add_argument("--out", default="out"); ap.add_argument("--respect-clock", action="store_true")
     a = ap.parse_args()
     now = datetime.now(MIAMI)
+    if a.respect_clock and (now.weekday() != 3 or now.hour * 60 + now.minute < 16 * 60 + 20):
+        print(f"Ainda não é quinta depois das 16:20 em Miami ({now:%a %H:%M}) — nada a fazer"); return
     day = date.fromisoformat(a.date) if a.date else next_friday(now.date())
     print(f"Hoje (Miami): {now:%a %Y-%m-%d %H:%M} → pedidos de {day:%a %Y-%m-%d}")
+    key = f"farms:{day.isoformat()}" + (":test" if a.test else "")
+    sent = {} if a.dry_run else (gist_load() or {})
+    if sent.get(key): print(f"  já enviado em {sent[key]} — nada a fazer"); return
     orders, warn = collect(day)
     os.makedirs(a.out, exist_ok=True)
     files, resumo, vazias = [], [], []
@@ -146,6 +151,9 @@ def main():
                       json={"from": FROM_EMAIL, "to": to, "cc": cc, "subject": subject, "html": body, "attachments": atts})
     if r.status_code >= 300: sys.exit(f"Resend {r.status_code}: {r.text[:200]}")
     print(f"  enviado ({r.json().get('id')}) para {to} cc {cc}")
+    sent[key] = now.isoformat(timespec="minutes")
+    try: gist_save(sent)
+    except Exception as e: print("  ATENÇÃO: enviado, mas não registrado no Gist —", e)
 
 if __name__ == "__main__":
     main()

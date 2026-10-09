@@ -2,8 +2,9 @@ name: Pedidos das fazendas da Califórnia (quinta → sexta)
 
 on:
   schedule:
-    - cron: '20 20 * * 4'   # quinta 4:20 PM Miami no horário de verão (EDT)
-    - cron: '20 21 * * 4'   # quinta 4:20 PM Miami no horário padrão (EST)
+    # O GitHub atrasa o cron: tenta a cada 15 min a partir de 16:20 Miami de quinta; o 1º envia, o Gist evita repetir
+    - cron: '20,35,50,5 20-23 * * 4'
+    - cron: '5,20,35,50 0 * * 5'
   workflow_dispatch:
     inputs:
       date:
@@ -12,6 +13,8 @@ on:
       mode:
         description: 'dry-run (só gera Excel) | test (envia só para o Pedro) | real'
         required: true
+        type: choice
+        options: [test, dry-run, real]
         default: 'test'
 
 jobs:
@@ -28,13 +31,14 @@ jobs:
         env:
           RESEND_API_KEY:   ${{ secrets.RESEND_API_KEY }}
           FULLPOTOS_COOKIE: ${{ secrets.FULLPOTOS_COOKIE }}
+          GH_TOKEN:         ${{ secrets.GH_TOKEN }}
+          RESULTS_GIST_ID:  ${{ secrets.RESULTS_GIST_ID }}
           # Agendado: vai direto para o Valerii com cópia para o Pedro. Para pausar: variável FARM_ORDERS_MODE = test ou dry-run
           MODE: ${{ github.event_name == 'schedule' && (vars.FARM_ORDERS_MODE || 'real') || inputs.mode }}
           DATE: ${{ inputs.date }}
         run: |
-          H=$(TZ=America/New_York date +%H)
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$H" != "16" ]; then echo "Fora das 4 PM em Miami ($H h) — nada a fazer"; exit 0; fi
           ARGS=""
+          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --respect-clock"
           [ -n "$DATE" ] && ARGS="$ARGS --date $DATE"
           case "$MODE" in dry-run) ARGS="$ARGS --dry-run" ;; test) ARGS="$ARGS --test" ;; real) ;; *) echo "MODE inválido"; exit 1 ;; esac
           python orders/farm_orders.py $ARGS
