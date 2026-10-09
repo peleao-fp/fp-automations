@@ -45,7 +45,10 @@ SCHEMA = {
         "total_quantity": {"type": "number", "description": "'Total Quantities' or carton count as printed; 0 if none"},
         "notes": {"type": "string", "description": "Anything relevant that does not fit above (substitutions, comments)"},
         "uncertainties": {"type": "array", "items": {"type": "string"},
-                          "description": "Things you could not read with certainty or that need a buyer decision, in Portuguese (e.g. 'código 7121-06-2218 parece ser 7121-06-2216')"},
+                          "description": ("ONLY genuine doubts, in Portuguese, that need the buyer: something unreadable, an item code that "
+                                          "looks like a different code, a substitution, a quantity/price that seems wrong. Do NOT restate rules, "
+                                          "do NOT describe actions, do NOT mention that a text reply has no prices or quantities. Empty list if none. "
+                                          "Example: 'código 7121-06-2218 na resposta; no PB da NPL existe 7121-06-2216 — é o mesmo item?'")},
     },
 }
 WRAPPER = {"type": "object", "additionalProperties": False, "required": ["documents"],
