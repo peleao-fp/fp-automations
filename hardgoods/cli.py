@@ -191,6 +191,38 @@ def cmd_packing(a):
     if a.apply: print("\nPackings ficam ABERTOS e sem Send to WH — confira na tela do Inventory Entry.")
     else: print("\n(simulação — nada gravado)")
 
+def cmd_invoice(a):
+    """Aplica uma conferência de invoice (plano JSON): custo do PO, custo/venda da caixa, número da invoice no packing.
+    Linhas 'missing' (não vieram) e de cliente (venda do vendedor) não são tocadas."""
+    plan = json.load(open(a.plan)); only = set(a.only or [])
+    todo = [it for it in plan if it["status"] != "missing" and it.get("box_unico") and (not only or it["box_unico"] in only)]
+    print(f"{len(todo)} linhas · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}")
+    for it in todo:
+        p = it["po"]; new_sale = it.get("sale_new")
+        print(f"  {p['description'].strip()[:40]:<40} custo/un {it['unit_f']:.4f} (caixa {it['cost_ie']:.4f})"
+              f" venda {it.get('sale_old')} → {new_sale if new_sale else 'mantém'}")
+        if not a.apply: continue
+        P.update(p["unico"], unit_price=it["unit_f"], confirm=True,
+                 details=f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - {it['invoice']} conferida"[:250])
+        if a.box_cost:   # PUT completo: muda o custo da caixa, mas ZERA o customer (bug do fullpotos)
+            mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
+            b, after = FP.update_box(it["box_unico"], cost=it["cost_ie"], price=new_sale, fill_box_id=mark)
+        else:            # sem --box-cost: a caixa não é tocada (a rota "Change Prices" responde OK mas não grava)
+            after = FP.box(it["box_unico"])
+        print(f"     ok · BOXID '{(after.get('box_id') or '').strip()}' · customer {after.get('customer')} · custo {after.get('f_cost_x_u')} · venda {after.get('price_x_u')}")
+    if a.apply and a.remove_missing and not only:   # o que não veio: tira a caixa e zera o PO
+        for it in plan:
+            if it["status"] != "missing": continue
+            p = it["po"]
+            if it.get("box_unico"): FP.delete_box(it["box_unico"])
+            P.update(p["unico"], qty=0, details=f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - NAO VEIO na invoice"[:250])
+            print(f"  removido (não veio): {p['description'].strip()[:40]} · caixa {it.get('box_unico')} apagada · PO {p['grower_po']} zerado")
+    if a.apply and a.headers and not only:
+        for pk, inv in (x.split("=", 1) for x in a.headers):
+            h = FP.packing(pk); det = re.sub(r"XINVOICE - AGUARDANDO INVOICE", "INVOICE " + inv, (h.get("details") or "").strip())
+            h2 = FP.update_packing_header(pk, invoice_no=inv, details=det)
+            print(f"  packing {pk}: invoice {(h2.get('invoice_no') or '').strip()} · {(h2.get('details') or '').strip()}")
+
 def main():
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("pb"); s.add_argument("pb", nargs="+"); s.set_defaults(f=cmd_pb)
@@ -201,6 +233,9 @@ def main():
     s = sub.add_parser("merge"); s.add_argument("pb", nargs="+"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_merge)
     s = sub.add_parser("packing"); s.add_argument("--grower", required=True); s.add_argument("--ship", required=True)
     s.add_argument("--available"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_packing)
+    s = sub.add_parser("invoice"); s.add_argument("--plan", required=True); s.add_argument("--only", nargs="*")
+    s.add_argument("--headers", nargs="*", help="pack_uq=SI-123 ..."); s.add_argument("--box-cost", action="store_true")
+    s.add_argument("--remove-missing", action="store_true"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_invoice)
     a = ap.parse_args(); a.f(a)
 
 if __name__ == "__main__":

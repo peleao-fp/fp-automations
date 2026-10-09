@@ -69,3 +69,64 @@ def packing_details(pack_uq):
     rows = req("GET", f"/api/inventory-entry/packings/{pack_uq}/details")
     rows = rows if isinstance(rows, list) else (rows or {}).get("boxes") or (rows or {}).get("data") or []
     return [{k.lower(): v for k, v in r.items()} for r in rows]
+
+def box(unico):
+    return req("GET", f"/api/inventory-entry/boxes/{unico}")
+
+def update_box(unico, cost=None, price=None, fill_box_id=None):
+    """Altera custo (f_cost_x_u) e/ou venda (price_x_u) da caixa; tudo o mais vai igual ao que está gravado.
+    Nunca apaga o BOXID: manda o atual, ou fill_box_id se estiver vazio. Confere customer/BOXID na leitura de volta."""
+    b = box(unico)
+    if not b: raise RuntimeError(f"caixa {unico} não encontrada")
+    st = lambda v: (v or "").strip() if isinstance(v, str) else v
+    box_id = st(b.get("box_id")) or (fill_box_id or "")
+    body = {
+        "product_uq": b.get("box_pack_uq"), "product_desc": st(b.get("description")), "case_uq": b.get("case_uq"),
+        "cporder_no": st(b.get("cporder_no")) or "", "box_qty": b.get("box_qty"), "packs_box": b.get("packs_box"),
+        "packs_units": b.get("up_x_pack"), "stem_pack": b.get("stem_pack"), "lote": b.get("lote"), "cut_point": b.get("cut_point"),
+        "box_id": box_id, "price_x_u": round(float(price if price is not None else b.get("price_x_u") or 0), 2),
+        "f_cost_x_u": round(float(cost if cost is not None else b.get("f_cost_x_u") or 0), 4),
+        "freight_cost": b.get("freight_cost"), "duties_cost": b.get("duties_cost"), "broker_cost": b.get("broker_cost"),
+        "handling_cost": b.get("handling_cost"), "charge_cost": b.get("charge_cost"), "inventory_notes": st(b.get("inventory_notes")) or "",
+        "units_x_box": b.get("tunits_x_box"), "total_units": b.get("total_units"), "t_charges": b.get("total_charge"),
+        "c_cost_x_u": b.get("c_cost_x_u"), "t_cost_x_u": b.get("t_cost_x_u"), "user_uq": user_uq(),
+    }
+    r = req("PUT", f"/api/inventory-entry/boxes/{unico}", body)
+    if not (r and r.get("success")): raise RuntimeError(f"PUT da caixa falhou: {r}")
+    audit("Edit", "flower_packing_box", unico, "Update Inventory Box FlexyMaxApp")
+    a = box(unico)
+    for k in ("customer", "customer_uq", "box_qty", "box_pack_uq"):
+        if a.get(k) != b.get(k): raise RuntimeError(f"CONFERÊNCIA: campo {k} mudou ({b.get(k)} → {a.get(k)}) na caixa {unico}")
+    if st(a.get("box_id")) != box_id: raise RuntimeError(f"CONFERÊNCIA: BOXID ficou '{st(a.get('box_id'))}', esperado '{box_id}'")
+    return b, a
+
+def update_packing_header(pack_uq, **changes):
+    h = packing(pack_uq)
+    if not h: raise RuntimeError(f"packing {pack_uq} não encontrado")
+    st = lambda v: (v or "").strip() if isinstance(v, str) else v
+    body = {"grower_uq": st(h.get("grower_uq")), "packing_no": st(h.get("packing_no")), "invoice_no": st(h.get("invoice_no")),
+            "awbcode": st(h.get("awbcode")), "invoice_date": str(h.get("date_invo"))[:10], "details": st(h.get("details")),
+            "wphysical_uq": st(h.get("wphysical_uq")), "porder_no": int(h.get("porder_no") or 0),
+            "available_date": str(h.get("available_date"))[:10], "consolidated": bool(h.get("consolidated"))}
+    body.update(changes)
+    r = req("PUT", f"/api/inventory-entry/packings/{pack_uq}", body)
+    if not (r and r.get("success")): raise RuntimeError(f"PUT do packing falhou: {r}")
+    audit("Edit", "flower_packing", pack_uq, "Update Packing List FlexyMaxApp")
+    return packing(pack_uq)
+
+def set_price(unico, price):
+    """Só a venda (rota "Change Prices" da tela web). Confere que customer/BOXID não mudaram."""
+    b = box(unico)
+    r = req("PUT", f"/api/inventory-entry/boxes/{unico}/price", {"price_x_unit": round(float(price), 2), "user_uq": user_uq()})
+    if not (r and r.get("success")): raise RuntimeError(f"Change Prices falhou: {r}")
+    audit("Edit", unico, unico, "Change Prices FlexyMaxApp")
+    a = box(unico)
+    for k in ("customer", "customer_uq", "box_id", "f_cost_x_u", "box_qty"):
+        if a.get(k) != b.get(k): raise RuntimeError(f"CONFERÊNCIA: {k} mudou ({b.get(k)} → {a.get(k)}) na caixa {unico}")
+    return a
+
+def delete_box(unico):
+    r = req("DELETE", f"/api/inventory-entry/boxes/{unico}", {"user_uq": user_uq()})
+    if not (r and r.get("success")): raise RuntimeError(f"apagar caixa falhou: {r}")
+    audit("Delete", "flower_packing_box", unico, "Delete Inventory Box FlexyMaxApp")
+    return r
