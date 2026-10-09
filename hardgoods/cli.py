@@ -241,6 +241,46 @@ def cmd_invoice(a):
             h2 = FP.update_packing_header(pk, invoice_no=inv, details=det)
             print(f"  packing {pk}: invoice {(h2.get('invoice_no') or '').strip()} · {(h2.get('details') or '').strip()}")
 
+def cmd_adjust(a):
+    """Ajustes pontuais depois da invoice. Simula sem --apply.
+    po-units PO UNID   · unidades por caixa do PO (preço por unidade mantido)
+    box-units CAIXA UNID · unidades da caixa no Inventory Entry (rota lot info; confere customer)
+    add-box PACKING PRODUTO QTD UNID VENDA · caixa de estoque sem PO (custo 0), ex.: amostra"""
+    op, args = a.op, a.args
+    if op == "po-units":
+        unico, units = args[0], int(args[1]); d = P.po_detail(unico)
+        unit_price = float(d["po_price"]) / max(1, int(d["up_x_pack"]))
+        print(f"PO {unico} {d['description'].strip()[:40]}: {d['qty_porder']} cx × {d['bunches_case']} → × {units} un @ {unit_price}")
+        if not a.apply: return print("(simulação)")
+        x = P._req("PUT", f"/api/purchase-orders/{unico}", {**_po_payload(d), "bunches_case": units})
+        if not x or x.get("error") is not False: sys.exit(f"falhou: {x}")
+        d = P.po_detail(unico); print(f"  ok: {d['qty_porder']} cx × {d['bunches_case']} = {d['total_units']} un · ${d['ext_price']}")
+    elif op == "box-units":
+        unico, units = args[0], int(args[1]); b = FP.box(unico)
+        print(f"caixa {unico} lote {b['lote']} {b['description'].strip()[:36]}: {b['packs_box']} → {units} un · customer {b['customer']}")
+        if not a.apply: return print("(simulação)")
+        b0, b1 = FP.update_box(unico, packs_box=units, allow_customer_reset=True)   # Edit Box (zera o customer)
+        print(f"  ok: {b1['packs_box']} un · total {b1['total_units']} · customer {b0['customer']} → {b1['customer']} · BOXID {(b1.get('box_id') or '').strip()}")
+        if b1.get("customer") != b0.get("customer"): print("  ATENÇÃO: customer mudou — recolocar")
+    elif op == "add-box":
+        pack, search, qty, units, price = args[0], args[1], int(args[2]), int(args[3]), float(args[4])
+        prods = [x for x in FP.find_product(search) if search.upper() in (x.get("description") or "").upper()]
+        for x in prods[:5]: print(f"  produto: {x.get('unico')} · {(x.get('description') or '').strip()[:50]} · caixa {x.get('case_uq')}")
+        if len(prods) != 1: sys.exit(f"esperava 1 produto para '{search}', achei {len(prods)}")
+        pr = prods[0]; case = pr.get("case_uq") or P.CASE_UQ["BX"]
+        print(f"Add Box no packing {pack}: {qty} cx × {units} un · custo 0 · venda {price}")
+        if not a.apply: return print("(simulação)")
+        r = FP.add_box(pack, pr["unico"], case, qty, units, 1, price); print("  ok:", r)
+
+def _po_payload(d):
+    case_sh = (d.get("case_sh") or "").strip(); wh = P.WH_BY_NAME.get((d.get("wp_name") or "").strip().upper())
+    return {"grower_uq": d["grower_uq"], "product_uq": d["product_uq"], "case_uq": P.CASE_UQ[case_sh], "qty_porder": int(d["qty_porder"]),
+            "qty_confirm": int(d["qty_confirm"]), "bunches_case": int(d["bunches_case"]), "up_x_pack": int(d["up_x_pack"]),
+            "po_price": float(d["po_price"]), "charges": 0, "broker": 0, "handling": 0, "freight": 0, "duties": 0,
+            "ship_date": (d.get("ship_date") or "")[:10], "food": False, "pccode": (d.get("description") or "")[:20].strip(),
+            "details": (d.get("details") or "").strip() or ".", "salesman": P.SALESMAN, "wphysical_uq": wh, "buyer_uq": P.BUYER_UQ,
+            "farm_item": ".", "purchase_type": "S"}
+
 def main():
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("pb"); s.add_argument("pb", nargs="+"); s.set_defaults(f=cmd_pb)
@@ -255,6 +295,8 @@ def main():
     s.add_argument("--headers", nargs="*", help="pack_uq=SI-123 ..."); s.add_argument("--box-cost", action="store_true")
     s.add_argument("--packs", nargs="*", help="SO-123=pack_uq …"); s.add_argument("--check-totals")
     s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_invoice)
+    s = sub.add_parser("adjust"); s.add_argument("op", choices=["po-units", "box-units", "add-box"]); s.add_argument("args", nargs="+")
+    s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_adjust)
     a = ap.parse_args(); a.f(a)
 
 if __name__ == "__main__":
