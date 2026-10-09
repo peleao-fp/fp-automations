@@ -130,10 +130,11 @@ def load_gist(gid):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gist"); ap.add_argument("--files", nargs="*"); ap.add_argument("--subject", default=""); ap.add_argument("--sender", default="")
+    ap.add_argument("--text", default="", help="corpo do e-mail (teste manual, sem Gist)")
     ap.add_argument("--no-email", action="store_true"); ap.add_argument("--out", default="out")
     a = ap.parse_args()
     if a.gist: subject, sender, body, atts = load_gist(a.gist)
-    else: subject, sender, body, atts = a.subject, a.sender, "", [(os.path.basename(f), open(f, "rb").read()) for f in a.files or []]
+    else: subject, sender, body, atts = a.subject, a.sender, a.text, [(os.path.basename(f), open(f, "rb").read()) for f in a.files or []]
     docs = []
     for att in (atts or [None]):        # uma leitura por anexo; cada anexo pode ter várias invoices (uma por loja)
         docs.extend(reader.read_document(subject, sender, body, [att] if att else []))

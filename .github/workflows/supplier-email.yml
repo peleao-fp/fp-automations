@@ -7,7 +7,16 @@ on:
     inputs:
       gist_id:
         description: 'Gist com meta.json, body.txt e anexos att_<nome>.b64'
-        required: true
+        required: false
+      subject:
+        description: 'Teste manual: assunto'
+        required: false
+      sender:
+        description: 'Teste manual: remetente'
+        required: false
+      text:
+        description: 'Teste manual: corpo do e-mail (sem Gist)'
+        required: false
 
 jobs:
   observe:
@@ -25,7 +34,12 @@ jobs:
           RESEND_API_KEY:    ${{ secrets.RESEND_API_KEY }}
           GH_TOKEN:          ${{ secrets.GH_TOKEN }}
           GIST_ID: ${{ github.event.client_payload.gist_id || inputs.gist_id }}
-        run: python -m bot.observe --gist "$GIST_ID"
+          SUBJECT: ${{ inputs.subject }}
+          SENDER: ${{ inputs.sender }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          if [ -n "$GIST_ID" ]; then python -m bot.observe --gist "$GIST_ID"
+          else python -m bot.observe --subject "$SUBJECT" --sender "$SENDER" --text "$TEXT"; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
