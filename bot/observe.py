@@ -56,7 +56,7 @@ def plan_invoice(doc, pos):
     sub = sum(float(l["extension"] or 0) for l in lines) or 1; F = float(doc["freight"] or 0) + float(doc["other_charges"] or 0)
     used, rows = set(), []
     for l in lines:
-        cand = [p for p in pos if p["unico"] not in used and l["code"].upper() in codes(p["description"])]
+        cand = [p for p in pos if p["unico"] not in used and l["code"].upper() in codes(f"{p['description']} {p.get('details') or ''}")]
         p = next((x for x in cand if int(x["qty_porder"] or 0) == int(l["qty_shipped"] or 0)), cand[0] if cand else None)
         if not p: rows.append({"kind": "extra", "line": l}); continue
         used.add(p["unico"])

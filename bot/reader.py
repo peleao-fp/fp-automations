@@ -99,7 +99,9 @@ def check_totals(d):
     """Trava: soma das linhas tem que bater com o subtotal impresso (e caixas com o total de quantidades)."""
     s = round(sum(float(l["extension"] or 0) for l in d["lines"]), 2)
     q = round(sum(float(l["qty_shipped"] or 0) for l in d["lines"]), 2)
+    by_case = all((l["unit"] or "").upper() in ("CS", "CASE", "BX", "BOX", "CTN") for l in d["lines"] if l["qty_shipped"])
     problems = []
     if d["subtotal"] and abs(s - float(d["subtotal"])) > 0.02: problems.append(f"linhas ${s:,.2f} ≠ subtotal ${float(d['subtotal']):,.2f}")
-    if d["total_quantity"] and abs(q - float(d["total_quantity"])) > 0.01: problems.append(f"quantidade {q:g} ≠ total impresso {float(d['total_quantity']):g}")
+    # a contagem de caixas impressa só compara com linhas em caixa (invoice em unidades: vale só a soma dos valores)
+    if by_case and d["total_quantity"] and abs(q - float(d["total_quantity"])) > 0.01: problems.append(f"quantidade {q:g} ≠ total impresso {float(d['total_quantity']):g}")
     return problems
