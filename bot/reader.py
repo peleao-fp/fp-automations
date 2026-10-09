@@ -58,7 +58,11 @@ SYSTEM = (
     "You read emails and attachments sent by Full Pot's hardgoods suppliers (Syndicate Sales, WD Imports, Smithers-Oasis, "
     "Giftwares and others). Extract exactly what is printed: never invent items, quantities or prices, and keep item codes "
     "exactly as written. One email may cover several stores; when it does, return the data of the document you are given. "
-    "A line whose description sits on the line above its numbers is still one line. Include every line, even with zero price."
+    "A line whose description sits on the line above its numbers is still one line. Include every line, even with zero price.\n\n"
+    "About the field 'uncertainties': list ONLY genuine doubts that need the buyer's decision, written in Portuguese — "
+    "an unreadable value, an item code that looks like a different code in the order, a substitution, a quantity or price "
+    "that seems wrong. Never restate a rule, never describe an action to take, and never mention that a text reply has no "
+    "prices or quantities. When there is no real doubt, return an empty list."
 )
 
 RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "regras.md")
