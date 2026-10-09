@@ -30,6 +30,10 @@ def prefix_of(supplier):
 
 def codes(desc): return CODE.findall((desc or "").upper())
 
+def has_code(code, text):
+    """Código exato da fatura dentro do texto do PO (descrição + notas), sem pegar pedaço de outro código."""
+    return re.search(r"(?<![A-Z0-9])" + re.escape(code.upper()) + r"(?![A-Z0-9])", (text or "").upper()) is not None
+
 def so_units(c):
     raw = c / 0.62; b = math.floor(raw); return round(b + 0.99 if raw <= b + 0.99 else b + 1.99, 2)
 
@@ -55,19 +59,23 @@ def plan_invoice(doc, pos):
     lines = [l for l in doc["lines"] if (l["qty_shipped"] or l["extension"])]
     sub = sum(float(l["extension"] or 0) for l in lines) or 1; F = float(doc["freight"] or 0) + float(doc["other_charges"] or 0)
     used, rows = set(), []
+    units = lambda p: int(p["qty_porder"] or 0) * int(p["bunches_case"] or 1) * int(p["up_x_pack"] or 1)
     for l in lines:
-        cand = [p for p in pos if p["unico"] not in used and l["code"].upper() in codes(f"{p['description']} {p.get('details') or ''}")]
-        p = next((x for x in cand if int(x["qty_porder"] or 0) == int(l["qty_shipped"] or 0)), cand[0] if cand else None)
-        if not p: rows.append({"kind": "extra", "line": l}); continue
-        used.add(p["unico"])
-        upc = int(p["bunches_case"] or 1) * int(p["up_x_pack"] or 1)
-        per_unit_invoice = l["unit"].upper() in ("EA", "EACH", "PC", "UN", "UNIT")
-        qty_units = float(l["qty_shipped"]) * (1 if per_unit_invoice else upc)
-        unit_cost = (float(l["extension"]) + float(l["extension"]) / sub * F) / qty_units if qty_units else 0
-        old = float(p["po_price"] or 0) / max(1, int(p["up_x_pack"] or 1))
-        po_units = int(p["qty_porder"] or 0) * upc
-        rows.append({"kind": "match", "line": l, "po": p, "upc": upc, "unit_cost": round(unit_cost, 4), "old_cost": round(old, 4),
-                     "qty_diff": qty_units - po_units, "po_units": po_units, "inv_units": qty_units})
+        cand = [p for p in pos if p["unico"] not in used and has_code(l["code"], f"{p['description']} {p.get('details') or ''}")]
+        if not cand: rows.append({"kind": "extra", "line": l}); continue
+        per_unit_invoice = (l["unit"] or "").upper() in ("EA", "EACH", "PC", "UN", "UNIT")
+        upc0 = int(cand[0]["bunches_case"] or 1) * int(cand[0]["up_x_pack"] or 1)
+        inv_units = float(l["qty_shipped"]) * (1 if per_unit_invoice else upc0)
+        one = [p for p in cand if units(p) == inv_units]
+        group = one[:1] or (cand if abs(sum(units(p) for p in cand) - inv_units) < 0.01 else cand[:1])   # vários POs do mesmo item
+        unit_cost = (float(l["extension"]) + float(l["extension"]) / sub * F) / inv_units if inv_units else 0
+        left = inv_units
+        for i, p in enumerate(group):
+            used.add(p["unico"])
+            pu = units(p); got = pu if i < len(group) - 1 else left; left -= got
+            old = float(p["po_price"] or 0) / max(1, int(p["up_x_pack"] or 1))
+            rows.append({"kind": "match", "line": l, "po": p, "upc": int(p["bunches_case"] or 1) * int(p["up_x_pack"] or 1),
+                         "unit_cost": round(unit_cost, 4), "old_cost": round(old, 4), "qty_diff": got - pu, "po_units": pu, "inv_units": got})
     for p in pos:
         if p["unico"] not in used: rows.append({"kind": "missing", "po": p})
     return rows
