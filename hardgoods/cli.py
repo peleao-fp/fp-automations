@@ -191,38 +191,50 @@ def cmd_packing(a):
     if a.apply: print("\nPackings ficam ABERTOS e sem Send to WH — confira na tela do Inventory Entry.")
     else: print("\n(simulação — nada gravado)")
 
+def _so_units(c):   # venda por unidade: custo ÷ 0,62 subindo para o ,99
+    raw = c / 0.62; base = math.floor(raw); return round(base + 0.99 if raw <= base + 0.99 else base + 1.99, 2)
+def _so_box(c):     # venda para cliente de caixa: custo ÷ 0,62, centavo para cima
+    return math.ceil(round(c / 0.62 * 100, 6)) / 100
+
 def cmd_invoice(a):
-    """Aplica uma conferência de invoice (plano JSON): custo do PO, custo/venda da caixa, número da invoice no packing.
-    Linhas 'missing' (não vieram) e de cliente (venda do vendedor) não são tocadas."""
-    plan = json.load(open(a.plan)); only = set(a.only or [])
-    todo = [it for it in plan if it["status"] != "missing" and it.get("box_unico") and (not only or it["box_unico"] in only)]
+    """Aplica uma conferência de invoice (plano JSON gerado pela leitura da fatura).
+    status ok/qty: corrige o custo do PO (e da caixa com --box-cost) · restore: volta PO e caixa de item tirado por engano.
+    A venda é recalculada pelo custo: abaixo de 38% ou acima de 75% (venda de caixa no lugar da unidade) vai para a regra;
+    cliente (não-loja) vai para custo ÷ 0,62. O fullpotos zera o customer em todo Edit Box: a lista sai no fim."""
+    plan = json.load(open(a.plan)); only = set(a.only or []); packs = dict(x.split("=", 1) for x in (a.packs or []))
+    if a.check_totals:
+        for so, (lido, sub) in json.load(open(a.check_totals)).items():
+            if abs(lido - sub) > 0.01: sys.exit(f"PARADO: {so} linhas lidas ${lido} ≠ subtotal da fatura ${sub}")
+    todo = [it for it in plan if it["status"] != "missing" and (not only or it.get("box_unico") in only)]
     print(f"{len(todo)} linhas · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}"); lost = []
     for it in todo:
-        p = it["po"]; new_sale = it.get("sale_new")
-        print(f"  {p['description'].strip()[:40]:<40} custo/un {it['unit_f']:.4f} (caixa {it['cost_ie']:.4f})"
-              f" venda {it.get('sale_old')} → {new_sale if new_sale else 'mantém'}")
-        if not a.apply: continue
-        P.update(p["unico"], unit_price=it["unit_f"], confirm=True,
-                 details=f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - {it['invoice']} conferida"[:250])
-        if a.box_cost:   # PUT completo: muda o custo da caixa, mas ZERA o customer (bug do fullpotos)
-            mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
-            b, after = FP.update_box(it["box_unico"], cost=it["cost_ie"], price=new_sale, fill_box_id=mark, allow_customer_reset=True)
-            if b.get("customer") != after.get("customer"):
-                lost.append((b.get("lote"), p["description"].strip(), b.get("customer"), (after.get("box_id") or "").strip()))
-        else:            # sem --box-cost: a caixa não é tocada (a rota "Change Prices" responde OK mas não grava)
-            after = FP.box(it["box_unico"])
-        print(f"     ok · BOXID '{(after.get('box_id') or '').strip()}' · customer {after.get('customer')} · custo {after.get('f_cost_x_u')} · venda {after.get('price_x_u')}")
+        p = it["po"]; unit = float(it.get("unit_f_new") or it["unit_f"]); upx = int(p["up_x_pack"]); cost_ie = round(unit * upx, 4)
+        so = next(s_ for s_ in packs if s_ in (p.get("details") or "")) if packs else None
+        note = f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - {it['invoice']} conferida"[:250]
+        if it["status"] == "restore":
+            print(f"  RESTAURA {p['description'].strip()[:36]:<36} PO {it['inv_qty']} cx @ {unit:.4f}/un → packing {packs.get(so)}")
+            if not a.apply: continue
+            P.update(p["unico"], unit_price=unit, qty=it["inv_qty"], confirm=True, details=note)
+            before = {b["unico"] for b in FP.packing_details(packs[so])}
+            FP.add_from_po(packs[so], p["unico"], it["inv_qty"])
+            new = [b for b in FP.packing_details(packs[so]) if b["unico"] not in before]
+            if len(new) != 1: sys.exit(f"PARADO: esperava 1 caixa nova, achei {len(new)}")
+            it["box_unico"] = new[0]["unico"]
+        elif a.apply:
+            P.update(p["unico"], unit_price=unit, confirm=True, details=note)
+        if not a.box_cost or not it.get("box_unico") or not a.apply:
+            if not a.apply: print(f"  {p['description'].strip()[:40]:<40} custo/un {unit:.4f}")
+            continue
+        b0 = FP.box(it["box_unico"]); sale = float(b0.get("price_x_u") or 0); m = (1 - cost_ie / sale) * 100 if sale > 0 else -1
+        ctype = it.get("ctype", "unit")
+        new_sale = _so_box(cost_ie) if ctype == "cliente" else (None if 38 <= m <= 75 else (_so_box(cost_ie) if ctype == "box" else _so_units(cost_ie)))
+        mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
+        b, after = FP.update_box(it["box_unico"], cost=cost_ie, price=new_sale, fill_box_id=mark, allow_customer_reset=True)
+        print(f"  {p['description'].strip()[:40]:<40} custo {b.get('f_cost_x_u')} → {after.get('f_cost_x_u')} · venda {b.get('price_x_u')} → {after.get('price_x_u')}")
+        if int(after.get("customer") or 0) == 0:
+            lost.append((after.get("lote"), p["description"].strip(), (after.get("box_id") or "").strip()))
     if lost:
-        print("\nCUSTOMER A RECOLOCAR (o Edit Box zera):")
-        for l in lost: print(f"  lote {l[0]} · {l[1][:40]} · customer {l[2]} · BOXID {l[3]}")
-        json.dump(lost, open(os.path.splitext(a.plan)[0] + "_customers.json", "w"))
-    if a.apply and a.remove_missing and not only:   # o que não veio: tira a caixa e zera o PO
-        for it in plan:
-            if it["status"] != "missing": continue
-            p = it["po"]
-            if it.get("box_unico"): FP.delete_box(it["box_unico"])
-            P.update(p["unico"], qty=0, details=f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - NAO VEIO na invoice"[:250])
-            print(f"  removido (não veio): {p['description'].strip()[:40]} · caixa {it.get('box_unico')} apagada · PO {p['grower_po']} zerado")
+        json.dump(lost, open(os.path.splitext(a.plan)[0] + "_customers.json", "w")); print(f"\n{len(lost)} caixas com customer a recolocar")
     if a.apply and a.headers and not only:
         for pk, inv in (x.split("=", 1) for x in a.headers):
             h = FP.packing(pk); det = re.sub(r"XINVOICE - AGUARDANDO INVOICE", "INVOICE " + inv, (h.get("details") or "").strip())
@@ -241,7 +253,8 @@ def main():
     s.add_argument("--available"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_packing)
     s = sub.add_parser("invoice"); s.add_argument("--plan", required=True); s.add_argument("--only", nargs="*")
     s.add_argument("--headers", nargs="*", help="pack_uq=SI-123 ..."); s.add_argument("--box-cost", action="store_true")
-    s.add_argument("--remove-missing", action="store_true"); s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_invoice)
+    s.add_argument("--packs", nargs="*", help="SO-123=pack_uq …"); s.add_argument("--check-totals")
+    s.add_argument("--apply", action="store_true"); s.set_defaults(f=cmd_invoice)
     a = ap.parse_args(); a.f(a)
 
 if __name__ == "__main__":
