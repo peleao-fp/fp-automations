@@ -72,14 +72,37 @@ def plan_invoice(doc, pos):
         if p["unico"] not in used: rows.append({"kind": "missing", "po": p})
     return rows
 
+def pb_lines(store, around, days=10):
+    """Linhas de PB (fechados) de hardgoods da loja, nas datas próximas."""
+    wh = {"PMP": "CAM27168", "WPB": "82G89770", "NPL": "YBRT6967", "MIA": "BUEB4005"}.get(store); out = {}
+    for i in range(-3, days + 1):
+        d = (around + timedelta(days=i)).isoformat()
+        try: rows = P._req("GET", f"/api/prebooks-without-po?date={d}&product_type=HARDGOODS") or {}
+        except Exception: continue
+        for x in rows.get("data", []):
+            if not wh or (x.get("wphysical_uq") or "").strip() == wh: out[x["pbook_d_uq"]] = x
+    return list(out.values())
+
+def similar(code, cands):
+    """Código parecido: mesmo começo (ex.: 7121-06-2218 × 7121-06-2216)."""
+    parts = code.split("-")
+    head = "-".join(parts[:-1]) if len(parts) > 2 else (code[:-2] if len(code) > 4 else code)
+    return [c for c in cands if c != code and c.startswith(head)]
+
 def plan_reply(doc, prefix, store):
-    """Resposta: o que não vem → linhas de PB/PO a tirar (busca nos POs e nos PBs fechados recentes)."""
+    """Resposta: o que não vem → linhas de PO/PB a tirar; código que não existe no PB mas parece outro → pergunta."""
     out = []
     bad = [l for l in doc["lines"] if l["status"] in ("out_of_stock", "discontinued", "cannot_order", "backorder")]
-    pos = find_pos(prefix, store, date.today(), doc.get("sales_order") or None, days=10) if bad else []
+    if not bad: return out
+    pos = find_pos(prefix, store, date.today(), doc.get("sales_order") or None, days=10)
+    pbs = pb_lines(store, date.today())
     for l in bad:
-        hit = [p for p in pos if l["code"].upper() in codes(p["description"])]
-        out.append({"line": l, "pos": hit})
+        code = l["code"].upper()
+        hit = [p for p in pos if code in codes(p["description"])]
+        pb_hit = [x for x in pbs if code in codes(x["description"])]
+        near = [] if (hit or pb_hit) else ([x for x in pbs if similar(code, codes(x["description"]))] +
+                                            [dict(p, pbook_no=p.get("pbook_no")) for p in pos if similar(code, codes(p["description"]))])
+        out.append({"line": l, "pos": hit, "pb": pb_hit, "near": near})
     return out
 
 def money(x): return f"${x:,.2f}"
@@ -107,8 +130,15 @@ def questions(doc, rows):
     else:
         for r in rows:
             l = r["line"]
-            q.append((f"{l['code']} {l['description'][:30]} — {l['status']}. Tiro do PB/PO?" + ("" if r["pos"] else " (não achei PO; procuraria no PB)"),
-                      "sim", "R1"))
+            if r["near"]:
+                n = r["near"][0]
+                q.append((f"{l['code']} ({l['status']}) não está no PB, mas o PB {n['pbook_no']} tem {n['description'].strip()[:40]}. É o mesmo item? Se sim, tiro.",
+                          "não faço nada até você confirmar", None))
+            elif r["pos"] or r["pb"]:
+                where = ", ".join([p["grower_po"] for p in r["pos"]] + [f"PB {x['pbook_no']}" for x in r["pb"]])
+                q.append((f"{l['code']} {l['description'][:30]} — {l['status']}. Tiro de {where}?", "sim", "R1"))
+            else:
+                q.append((f"{l['code']} {l['description'][:30]} — {l['status']}: não achei em nenhum PB/PO desta loja.", "nada a fazer", None))
     for u in doc.get("uncertainties") or []:
         q.append((f"A leitura ficou em dúvida: {u}", "não faço nada até você responder", None))
     return q
@@ -139,7 +169,8 @@ def report_html(doc, kind_rows, problems):
     else:
         for r in kind_rows:
             l = r["line"]
-            where = ", ".join(p["grower_po"] for p in r["pos"]) or "nenhum PO ainda (procuraria no PB)"
+            where = ", ".join([p["grower_po"] for p in r["pos"]] + [f"PB {x['pbook_no']}" for x in r["pb"]]) or \
+                    (f"parecido no PB {r['near'][0]['pbook_no']}: {r['near'][0]['description'].strip()[:30]}" if r["near"] else "não achei no PB/PO")
             h.append(f"<p>• {e(l['code'])} {e(l['description'][:40])} — <b>{e(l['status'])}</b> → tiraria de: {e(where)}</p>")
         if not kind_rows: h.append("<p>Nada a tirar: o fornecedor confirmou tudo.</p>")
     qs = questions(doc, kind_rows)
