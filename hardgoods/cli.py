@@ -196,7 +196,7 @@ def cmd_invoice(a):
     Linhas 'missing' (não vieram) e de cliente (venda do vendedor) não são tocadas."""
     plan = json.load(open(a.plan)); only = set(a.only or [])
     todo = [it for it in plan if it["status"] != "missing" and it.get("box_unico") and (not only or it["box_unico"] in only)]
-    print(f"{len(todo)} linhas · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}")
+    print(f"{len(todo)} linhas · {'GRAVANDO' if a.apply else 'SIMULAÇÃO'}"); lost = []
     for it in todo:
         p = it["po"]; new_sale = it.get("sale_new")
         print(f"  {p['description'].strip()[:40]:<40} custo/un {it['unit_f']:.4f} (caixa {it['cost_ie']:.4f})"
@@ -206,10 +206,16 @@ def cmd_invoice(a):
                  details=f"{re.sub(r' - .*$', '', p.get('details') or '').strip()} - {it['invoice']} conferida"[:250])
         if a.box_cost:   # PUT completo: muda o custo da caixa, mas ZERA o customer (bug do fullpotos)
             mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
-            b, after = FP.update_box(it["box_unico"], cost=it["cost_ie"], price=new_sale, fill_box_id=mark)
+            b, after = FP.update_box(it["box_unico"], cost=it["cost_ie"], price=new_sale, fill_box_id=mark, allow_customer_reset=True)
+            if b.get("customer") != after.get("customer"):
+                lost.append((b.get("lote"), p["description"].strip(), b.get("customer"), (after.get("box_id") or "").strip()))
         else:            # sem --box-cost: a caixa não é tocada (a rota "Change Prices" responde OK mas não grava)
             after = FP.box(it["box_unico"])
         print(f"     ok · BOXID '{(after.get('box_id') or '').strip()}' · customer {after.get('customer')} · custo {after.get('f_cost_x_u')} · venda {after.get('price_x_u')}")
+    if lost:
+        print("\nCUSTOMER A RECOLOCAR (o Edit Box zera):")
+        for l in lost: print(f"  lote {l[0]} · {l[1][:40]} · customer {l[2]} · BOXID {l[3]}")
+        json.dump(lost, open(os.path.splitext(a.plan)[0] + "_customers.json", "w"))
     if a.apply and a.remove_missing and not only:   # o que não veio: tira a caixa e zera o PO
         for it in plan:
             if it["status"] != "missing": continue

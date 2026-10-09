@@ -73,7 +73,7 @@ def packing_details(pack_uq):
 def box(unico):
     return req("GET", f"/api/inventory-entry/boxes/{unico}")
 
-def update_box(unico, cost=None, price=None, fill_box_id=None):
+def update_box(unico, cost=None, price=None, fill_box_id=None, allow_customer_reset=False):
     """Altera custo (f_cost_x_u) e/ou venda (price_x_u) da caixa; tudo o mais vai igual ao que está gravado.
     Nunca apaga o BOXID: manda o atual, ou fill_box_id se estiver vazio. Confere customer/BOXID na leitura de volta."""
     b = box(unico)
@@ -95,8 +95,10 @@ def update_box(unico, cost=None, price=None, fill_box_id=None):
     if not (r and r.get("success")): raise RuntimeError(f"PUT da caixa falhou: {r}")
     audit("Edit", "flower_packing_box", unico, "Update Inventory Box FlexyMaxApp")
     a = box(unico)
-    for k in ("customer", "customer_uq", "box_qty", "box_pack_uq"):
+    for k in (("box_qty", "box_pack_uq") if allow_customer_reset else ("customer", "customer_uq", "box_qty", "box_pack_uq")):
         if a.get(k) != b.get(k): raise RuntimeError(f"CONFERÊNCIA: campo {k} mudou ({b.get(k)} → {a.get(k)}) na caixa {unico}")
+    if abs(float(a.get("f_cost_x_u") or 0) - body["f_cost_x_u"]) > 0.001 or abs(float(a.get("price_x_u") or 0) - body["price_x_u"]) > 0.005:
+        raise RuntimeError(f"CONFERÊNCIA: custo/venda não gravaram na caixa {unico}")
     if st(a.get("box_id")) != box_id: raise RuntimeError(f"CONFERÊNCIA: BOXID ficou '{st(a.get('box_id'))}', esperado '{box_id}'")
     return b, a
 
