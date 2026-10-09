@@ -132,7 +132,10 @@ async function createPrebook(location, type, lines, grower_name, dryRun=false) {
       // Field mapping depends on type
       const up_x_pack   = type === 'BOX'   ? (line.units_x_box || 1) : 1;
       const packs_case  = type === 'UNITS'  ? (line.units_x_box || 1) : 1;
-      const sales_price = type === 'UNITS'  ? (line.unit_price || line.box_price) : line.box_price;
+      // UNITS sells by the unit: without Unit_Price, the box price is split by units per box (it used to go in whole)
+      const sales_price = type === 'UNITS'
+        ? (line.unit_price || (line.box_price && line.units_x_box > 1 ? +(line.box_price / line.units_x_box).toFixed(2) : line.box_price))
+        : line.box_price;
       const case_uq     = cfg.CASE_UQ.BOX;  // always BX
       // Grower: only on UNITS prebook, not BOX/Everyday
       const lineGrowerName = line.grower_name || grower_name;
