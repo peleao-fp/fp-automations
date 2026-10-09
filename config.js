@@ -58,6 +58,7 @@ module.exports = {
     { match: ['K AND M', 'K&M NURSERY'],         uq: '78E76B4F', name: 'K AND M NURSERY' },
     { match: ['FLORA AND MORE', 'FLORA & MORE'], uq: 'EF1DA8E7', name: 'FLORA AND MORE' },
     { match: ['SCHUSTER'],                       uq: 'C51909F1', name: 'SCHUSTERS OF TEXAS' },
+    { match: ['HAMPSHIRE'],                      uq: 'CDFCD0A2', name: 'HAMPSHIRE PAPER CORPORATION' },
     { match: ['RELIANT RIBBON'],                 uq: '6E3D70B3', name: 'RELIANT RIBBON' },
   ],
   LOCATIONS: {
