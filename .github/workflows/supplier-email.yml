@@ -17,6 +17,9 @@ on:
       text:
         description: 'Teste manual: corpo do e-mail (sem Gist)'
         required: false
+      files:
+        description: 'Teste manual: anexos que estão no repositório (caminhos separados por espaço)'
+        required: false
 
 jobs:
   observe:
@@ -37,8 +40,10 @@ jobs:
           SUBJECT: ${{ inputs.subject }}
           SENDER: ${{ inputs.sender }}
           TEXT: ${{ inputs.text }}
+          FILES: ${{ inputs.files }}
         run: |
           if [ -n "$GIST_ID" ]; then python -m bot.observe --gist "$GIST_ID"
+          elif [ -n "$FILES" ]; then python -m bot.observe --subject "$SUBJECT" --sender "$SENDER" --text "$TEXT" --files $FILES
           else python -m bot.observe --subject "$SUBJECT" --sender "$SENDER" --text "$TEXT"; fi
       - uses: actions/upload-artifact@v4
         if: always()

@@ -71,10 +71,14 @@ def read_document(subject, sender, body_text, attachments):
     """attachments: [(filename, bytes)]. Returns a LIST of documents (one per invoice/store found)."""
     client = anthropic.Anthropic()
     content = []
+    IMG = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
     for name, data in attachments:
-        if name.lower().endswith(".pdf"):
+        ext = os.path.splitext(name.lower())[1]
+        if ext == ".pdf":
             content.append({"type": "document", "title": name,
                             "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(data).decode()}})
+        elif ext in IMG:   # invoice escaneada / foto
+            content.append({"type": "image", "source": {"type": "base64", "media_type": IMG[ext], "data": base64.b64encode(data).decode()}})
     content.append({"type": "text", "text": f"From: {sender}\nSubject: {subject}\n\n{body_text or ''}\n\n"
                                              "Extract every document: one entry per invoice (a PDF may contain several invoices, "
                                              "one per store). For a text reply, one entry per store mentioned."})
