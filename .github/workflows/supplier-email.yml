@@ -1,0 +1,34 @@
+name: Bot hardgoods — e-mail de fornecedor (observando)
+
+on:
+  repository_dispatch:
+    types: [supplier-email]        # Power Automate do Leandro: pasta "Fornecedores"
+  workflow_dispatch:
+    inputs:
+      gist_id:
+        description: 'Gist com meta.json, body.txt e anexos att_<nome>.b64'
+        required: true
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install anthropic requests
+      - name: Ler e-mail e dizer o que faria (não grava nada)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY:    ${{ secrets.RESEND_API_KEY }}
+          GH_TOKEN:          ${{ secrets.GH_TOKEN }}
+          GIST_ID: ${{ github.event.client_payload.gist_id || inputs.gist_id }}
+        run: python -m bot.observe --gist "$GIST_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observe-${{ github.run_id }}
+          path: out/
+          retention-days: 30
