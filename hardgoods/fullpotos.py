@@ -161,3 +161,26 @@ def add_box(pack_uq, product_uq, case_uq, box_qty, packs_box, packs_units, price
     if not (r and r.get("success")): raise RuntimeError(f"Add Box falhou: {r}")
     audit("Insert", "flower_packing_box", r.get("unico") or pack_uq, "Insert Inventory Box FlexyMaxApp")
     return r
+
+def edit_box(unico, cost=None, price=None, packs_box=None, fill_box_id=None):
+    """Edita custo/venda/quantidade da caixa pela tela de packing do Flexymax, que GRAVA o customer junto
+    (o "Edit Box" do fullpotos web zera o customer). Confere tudo na leitura de volta."""
+    from . import flexy
+    b = box(unico)
+    if not b: raise RuntimeError(f"caixa {unico} não encontrada")
+    st = lambda v: (v or "").strip() if isinstance(v, str) else v
+    box_id = st(b.get("box_id")) or (fill_box_id or "")
+    new_cost = float(cost if cost is not None else b.get("f_cost_x_u") or 0)
+    new_price = float(price if price is not None else b.get("price_x_u") or 0)
+    new_packs = int(packs_box if packs_box is not None else b.get("packs_box") or 1)
+    flexy.packing_box_update(unico, b["box_pack_uq"], b["case_uq"], b["box_qty"], new_packs, b["up_x_pack"], new_cost, new_price,
+                             st(b.get("customer_uq")), b.get("customer"), box_id=box_id, cporder=st(b.get("cporder_no")),
+                             notes=st(b.get("inventory_notes")), freight=b.get("freight_cost") or 0, duties=b.get("duties_cost") or 0,
+                             handling=b.get("handling_cost") or 0, broker=b.get("broker_cost") or 0, other=b.get("charge_cost") or 0)
+    a = box(unico)
+    for k in ("customer", "customer_uq", "box_qty", "box_pack_uq"):
+        if a.get(k) != b.get(k): raise RuntimeError(f"CONFERÊNCIA: {k} mudou ({b.get(k)} → {a.get(k)}) na caixa {unico}")
+    if abs(float(a.get("f_cost_x_u") or 0) - round(new_cost, 4)) > 0.001 or abs(float(a.get("price_x_u") or 0) - round(new_price, 2)) > 0.005 \
+            or int(a.get("packs_box") or 0) != new_packs:
+        raise RuntimeError(f"CONFERÊNCIA: custo/venda/quantidade não gravaram na caixa {unico}")
+    return b, a

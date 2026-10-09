@@ -200,7 +200,7 @@ def cmd_invoice(a):
     """Aplica uma conferência de invoice (plano JSON gerado pela leitura da fatura).
     status ok/qty: corrige o custo do PO (e da caixa com --box-cost) · restore: volta PO e caixa de item tirado por engano.
     A venda é recalculada pelo custo: abaixo de 38% ou acima de 75% (venda de caixa no lugar da unidade) vai para a regra;
-    cliente (não-loja) vai para custo ÷ 0,62. O fullpotos zera o customer em todo Edit Box: a lista sai no fim."""
+    cliente (não-loja) vai para custo ÷ 0,62. A caixa é editada pela tela de packing do Flexymax, que mantém o customer."""
     plan = json.load(open(a.plan)); only = set(a.only or []); packs = dict(x.split("=", 1) for x in (a.packs or []))
     if a.check_totals:
         for so, (lido, sub) in json.load(open(a.check_totals)).items():
@@ -229,7 +229,7 @@ def cmd_invoice(a):
         ctype = it.get("ctype", "unit")
         new_sale = _so_box(cost_ie) if ctype == "cliente" else (None if 38 <= m <= 75 else (_so_box(cost_ie) if ctype == "box" else _so_units(cost_ie)))
         mark = f"FP#{p['cust'].split('-')[-1].split('/')[0].strip()}" if re.search(r"-\s*\d+\s*/", p.get("cust") or "") else None
-        b, after = FP.update_box(it["box_unico"], cost=cost_ie, price=new_sale, fill_box_id=mark, allow_customer_reset=True)
+        b, after = FP.edit_box(it["box_unico"], cost=cost_ie, price=new_sale, fill_box_id=mark)   # mantém o customer
         print(f"  {p['description'].strip()[:40]:<40} custo {b.get('f_cost_x_u')} → {after.get('f_cost_x_u')} · venda {b.get('price_x_u')} → {after.get('price_x_u')}")
         if int(after.get("customer") or 0) == 0:
             lost.append((after.get("lote"), p["description"].strip(), (after.get("box_id") or "").strip()))
@@ -259,7 +259,7 @@ def cmd_adjust(a):
         unico, units = args[0], int(args[1]); b = FP.box(unico)
         print(f"caixa {unico} lote {b['lote']} {b['description'].strip()[:36]}: {b['packs_box']} → {units} un · customer {b['customer']}")
         if not a.apply: return print("(simulação)")
-        b0, b1 = FP.update_box(unico, packs_box=units, allow_customer_reset=True)   # Edit Box (zera o customer)
+        b0, b1 = FP.edit_box(unico, packs_box=units)   # tela de packing do Flexymax: mantém o customer
         print(f"  ok: {b1['packs_box']} un · total {b1['total_units']} · customer {b0['customer']} → {b1['customer']} · BOXID {(b1.get('box_id') or '').strip()}")
         if b1.get("customer") != b0.get("customer"): print("  ATENÇÃO: customer mudou — recolocar")
     elif op == "add-box":

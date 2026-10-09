@@ -80,3 +80,27 @@ def insert_line(pb_uq, product_uq, case_uq, qty, packs_x_case, up_x_pack, sales_
     rows = call(A["insert_line"], pm, v)
     if not rows or rows[0].get("error"): raise RuntimeError(f"insert falhou: {rows}")
     return rows[0]
+
+# ── Packing (tela de packing do app Flexymax) — edita a caixa MANTENDO o customer ─────────────────────────
+A["packing_box_update"] = "6789f2f079bb654e94f63864"
+
+def packing_box_update(box_unico, product_uq, case_uq, box_qty, packs_case, units_pack, cost_unit, sale_price,
+                       customer_uq, customer_no, box_id="", cporder="", notes="", freight=0, duties=0, handling=0, broker=0, other=0):
+    """Mesmo "Update Box" da tela de packing do Flexymax: grava quantidade, custo, venda e o CUSTOMER (código + número)."""
+    pm = {
+        "(FormPackingBoxUpdate.data?.InpuInsertFreight || 0)": "k0", "(FormPackingBoxUpdate.data?.InputBoxIdUpdate || '')": "k1",
+        "(FormPackingBoxUpdate.data?.InputBoxNotesUpdate || '')": "k2", "(FormPackingBoxUpdate.data?.InputCaseDutiesUpdate || 0)": "k3",
+        "(FormPackingBoxUpdate.data?.InputCaseHandlingUpdate || 0)": "k4", "(FormPackingBoxUpdate.data?.InputCaseInsertBrokerUpdate || 0)": "k5",
+        "(FormPackingBoxUpdate.data?.InputCaseOtherCostsUpdate || 0)": "k6", "2": "k7",
+        "FormPackingBoxUpdate.data.InputBoxQtyUpdate": "k8", "FormPackingBoxUpdate.data.InputCPOUpdate": "k9",
+        "FormPackingBoxUpdate.data.InputPacksCaseUpdate": "k10", "FormPackingBoxUpdate.data.InputPriceUnitUpdate": "k11",
+        "FormPackingBoxUpdate.data.InputSalePriceUpdate": "k12", "FormPackingBoxUpdate.data.InputUnitsCaseUpdate": "k13",
+        "FormPackingBoxUpdate.data.InputUnitsPackUpdate": "k14", "SelectCasesListUpdate.selectedOptionValue": "k15",
+        "SelectCustomers.selectedOptionLabel.substring(SelectCustomers.selectedOptionLabel.indexOf('-') + 1).trim();": "k16",
+        "SelectCustomers.selectedOptionValue": "k17", "dsPackingBoxInfo.data[0].box_pack_uq": "k18", "dsPackingBoxInfo.data[0].unico": "k19",
+    }
+    v = {"k0": freight, "k1": box_id, "k2": notes, "k3": duties, "k4": handling, "k5": broker, "k6": other, "k7": 2,
+         "k8": int(box_qty), "k9": cporder, "k10": int(packs_case), "k11": round(float(cost_unit), 4), "k12": round(float(sale_price), 2),
+         "k13": int(packs_case) * int(units_pack), "k14": int(units_pack), "k15": case_uq, "k16": str(customer_no),
+         "k17": customer_uq, "k18": product_uq, "k19": box_unico}
+    return call(A["packing_box_update"], pm, v)
