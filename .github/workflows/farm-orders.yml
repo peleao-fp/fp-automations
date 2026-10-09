@@ -1,6 +1,10 @@
 name: Pedidos das fazendas da Califórnia (quinta → sexta)
 
 on:
+  # Gatilho principal: flow agendado do Power Automate (16:21 Miami, seg–sex) → repository_dispatch
+  repository_dispatch:
+    types: [farm-orders-trigger]
+  # Reserva: o cron do GitHub atrasa/descarta execuções; o Gist impede envio duplicado
   schedule:
     # O GitHub atrasa o cron: tenta a cada 15 min a partir de 16:20 Miami de quinta; o 1º envia, o Gist evita repetir
     - cron: '20,35,50,5 20-23 * * 4'
@@ -34,11 +38,11 @@ jobs:
           GH_TOKEN:         ${{ secrets.GH_TOKEN }}
           RESULTS_GIST_ID:  ${{ secrets.RESULTS_GIST_ID }}
           # Agendado: vai direto para o Valerii com cópia para o Pedro. Para pausar: variável FARM_ORDERS_MODE = test ou dry-run
-          MODE: ${{ github.event_name == 'schedule' && (vars.FARM_ORDERS_MODE || 'real') || inputs.mode }}
+          MODE: ${{ github.event_name != 'workflow_dispatch' && (vars.FARM_ORDERS_MODE || 'real') || inputs.mode }}
           DATE: ${{ inputs.date }}
         run: |
           ARGS=""
-          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --respect-clock"
+          [ "${{ github.event_name }}" != "workflow_dispatch" ] && ARGS="$ARGS --respect-clock"
           [ -n "$DATE" ] && ARGS="$ARGS --date $DATE"
           case "$MODE" in dry-run) ARGS="$ARGS --dry-run" ;; test) ARGS="$ARGS --test" ;; real) ;; *) echo "MODE inválido"; exit 1 ;; esac
           python orders/farm_orders.py $ARGS

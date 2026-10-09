@@ -1,6 +1,10 @@
 name: Pedidos diários (Holex / EZ / Anton)
 
 on:
+  # Gatilho principal: flow agendado do Power Automate (16:21 Miami, seg–sex) → repository_dispatch
+  repository_dispatch:
+    types: [daily-orders-trigger]
+  # Reserva: o cron do GitHub atrasa/descarta execuções; o Gist impede envio duplicado
   schedule:
     # O GitHub atrasa o cron: tenta a cada 15 min das 16:20 às ~19:50 Miami; o 1º após 16:20 envia, o Gist evita repetir
     - cron: '20,35,50,5 20-23 * * 1-5'
@@ -35,11 +39,11 @@ jobs:
           RESULTS_GIST_ID: ${{ secrets.RESULTS_GIST_ID }}
           # Agendado: envia de verdade (liberado pelo Pedro em 2026-10-07). Para pausar, crie a variável
           # do repositório DAILY_ORDERS_MODE = test (só o Pedro recebe) ou dry-run (não envia nada).
-          MODE: ${{ github.event_name == 'schedule' && (vars.DAILY_ORDERS_MODE || 'real') || inputs.mode }}
+          MODE: ${{ github.event_name != 'workflow_dispatch' && (vars.DAILY_ORDERS_MODE || 'real') || inputs.mode }}
           DATE: ${{ inputs.date }}
         run: |
           ARGS=""
-          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --respect-clock"
+          [ "${{ github.event_name }}" != "workflow_dispatch" ] && ARGS="$ARGS --respect-clock"
           [ -n "$DATE" ] && ARGS="$ARGS --date $DATE"
           case "$MODE" in
             dry-run) ARGS="$ARGS --dry-run" ;;
