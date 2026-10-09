@@ -27,7 +27,7 @@ LINE = {
 SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["supplier", "doc_type", "store", "sales_order", "invoice_number", "invoice_date", "lines",
-                 "subtotal", "freight", "other_charges", "total", "total_quantity", "notes"],
+                 "subtotal", "freight", "other_charges", "total", "total_quantity", "notes", "uncertainties"],
     "properties": {
         "supplier": {"type": "string"},
         "doc_type": {"type": "string", "enum": ["reply", "invoice", "order_confirmation", "other"],
@@ -44,6 +44,8 @@ SCHEMA = {
         "total": {"type": "number", "description": "Invoice total / net amount as printed (0 if none)"},
         "total_quantity": {"type": "number", "description": "'Total Quantities' or carton count as printed; 0 if none"},
         "notes": {"type": "string", "description": "Anything relevant that does not fit above (substitutions, comments)"},
+        "uncertainties": {"type": "array", "items": {"type": "string"},
+                          "description": "Things you could not read with certainty or that need a buyer decision, in Portuguese (e.g. 'código 7121-06-2218 parece ser 7121-06-2216')"},
     },
 }
 WRAPPER = {"type": "object", "additionalProperties": False, "required": ["documents"],
@@ -55,6 +57,8 @@ SYSTEM = (
     "exactly as written. One email may cover several stores; when it does, return the data of the document you are given. "
     "A line whose description sits on the line above its numbers is still one line. Include every line, even with zero price."
 )
+
+RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "regras.md")
 
 def read_document(subject, sender, body_text, attachments):
     """attachments: [(filename, bytes)]. Returns a LIST of documents (one per invoice/store found)."""
@@ -68,7 +72,8 @@ def read_document(subject, sender, body_text, attachments):
                                              "Extract every document: one entry per invoice (a PDF may contain several invoices, "
                                              "one per store). For a text reply, one entry per store mentioned."})
     resp = client.beta.messages.create(
-        model=MODEL, max_tokens=16000, system=SYSTEM, messages=[{"role": "user", "content": content}],
+        model=MODEL, max_tokens=16000, messages=[{"role": "user", "content": content}],
+        system=SYSTEM + "\n\nBuyer rules (Portuguese) to keep in mind when flagging uncertainties:\n" + open(RULES).read(),
         output_config={"format": {"type": "json_schema", "schema": WRAPPER}},
         betas=["server-side-fallback-2026-07-01"], fallbacks="default",
     )

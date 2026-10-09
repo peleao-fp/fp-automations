@@ -84,6 +84,35 @@ def plan_reply(doc, prefix, store):
 
 def money(x): return f"${x:,.2f}"
 
+def questions(doc, rows):
+    """Perguntas ao Pedro: (pergunta, o que o bot faria, regra que já cobre ou None)."""
+    q = []
+    if doc["doc_type"] == "invoice":
+        for r in rows:
+            if r["kind"] == "match":
+                l, po = r["line"], r["po"]
+                if r["old_cost"] and abs(r["unit_cost"] - r["old_cost"]) / r["old_cost"] > 0.05:
+                    q.append((f"{l['code']}: custo/un muda {r['old_cost']:.4f} → {r['unit_cost']:.4f} ({(r['unit_cost']/r['old_cost']-1)*100:+.0f}%). Atualizo PO e caixa?",
+                              "sim, uso o custo da fatura", None))
+                if r["qty_diff"]:
+                    q.append((f"{l['code']}: PO tem {r['po_units']:g} un, fatura {r['inv_units']:g} un ({l['status']}). Ajusto PO e caixa ao que veio?",
+                              "sim, deixo como veio", "R6"))
+            elif r["kind"] == "missing":
+                q.append((f"{r['po']['description'].strip()[:40]} ({r['po']['grower_po']}) não está na fatura. Tiro o PO e a caixa?",
+                          "sim, mas antes confiro se a leitura fechou com o subtotal", "R6"))
+            elif r["kind"] == "extra":
+                l = r["line"]
+                q.append((f"{l['code']} {l['description'][:30]} veio na fatura sem PO ({l['qty_shipped']:g} × ${l['price']}). O que faço?",
+                          "não entra, só aviso" if not l["price"] else "pergunto: criar PO ou ignorar", "R10" if not l["price"] else None))
+    else:
+        for r in rows:
+            l = r["line"]
+            q.append((f"{l['code']} {l['description'][:30]} — {l['status']}. Tiro do PB/PO?" + ("" if r["pos"] else " (não achei PO; procuraria no PB)"),
+                      "sim", "R1"))
+    for u in doc.get("uncertainties") or []:
+        q.append((f"A leitura ficou em dúvida: {u}", "não faço nada até você responder", None))
+    return q
+
 def report_html(doc, kind_rows, problems):
     e = html.escape
     h = [f"<h3>🔍 Bot hardgoods — OBSERVANDO (nada foi gravado)</h3>",
@@ -113,6 +142,13 @@ def report_html(doc, kind_rows, problems):
             where = ", ".join(p["grower_po"] for p in r["pos"]) or "nenhum PO ainda (procuraria no PB)"
             h.append(f"<p>• {e(l['code'])} {e(l['description'][:40])} — <b>{e(l['status'])}</b> → tiraria de: {e(where)}</p>")
         if not kind_rows: h.append("<p>Nada a tirar: o fornecedor confirmou tudo.</p>")
+    qs = questions(doc, kind_rows)
+    if qs:
+        h.append("<h4>Perguntas para você</h4><ol>")
+        for qq, ans, rule in qs:
+            tag = f"<span style='color:#2DA44E'>[regra {rule}: faria sem perguntar]</span>" if rule else "<span style='color:#BF8700'>[sem regra: preciso da sua resposta]</span>"
+            h.append(f"<li>{e(qq)}<br><i>O que eu faria: {e(ans)}</i> {tag}</li>")
+        h.append("</ol><p style='font-size:12px'>Responda pelo número (ex.: <b>1 sim, 3 não: deixa o PO</b>). Cada resposta nova vira uma regra em bot/regras.md.</p>")
     u = doc.get("_usage", {})
     h.append(f"<p style='color:#57606A;font-size:11px'>IA: {e(str(u.get('model')))} · {u.get('input')} tokens de entrada, {u.get('output')} de saída</p>")
     return "".join(h)
